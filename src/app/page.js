@@ -15,6 +15,10 @@ const MIN_SEGMENT_DURATION_SECONDS = 1;
 const MAX_SEGMENT_DURATION_SECONDS = 3600;
 const SEGMENT_DURATION_STORAGE_KEY = "audio-offairlogger-segment-duration-seconds";
 const RECORDER_AUDIO_BITS_PER_SECOND = 320_000;
+const RMS_METER_FLOOR_DB = -60;
+const RMS_METER_CEILING_DB = -12;
+const PEAK_METER_FLOOR_DB = -60;
+const PEAK_METER_CEILING_DB = -3;
 const RECORDER_MIME_TYPES = [
   "audio/mp4;codecs=mp4a.40.2",
   "audio/mp4",
@@ -370,8 +374,16 @@ export default function Home() {
             }
 
             const rms = Math.sqrt(sum / data.length);
-            const averageLevel = Math.min(1, rms * 3.8);
-            const peakLevelValue = Math.min(1, peak * 1.75);
+            const averageLevel = sampleToMeterPercent(
+              rms,
+              RMS_METER_FLOOR_DB,
+              RMS_METER_CEILING_DB
+            );
+            const peakLevelValue = sampleToMeterPercent(
+              peak,
+              PEAK_METER_FLOOR_DB,
+              PEAK_METER_CEILING_DB
+            );
             const now = performance.now();
 
             canvasContext.lineWidth = Math.max(2, width * 0.0036);
@@ -382,8 +394,8 @@ export default function Home() {
             canvasContext.shadowBlur = 0;
 
             if (now - meterUpdatedAtRef.current > 80) {
-              setInputLevel(Math.round(averageLevel * 100));
-              setPeakLevel(Math.round(peakLevelValue * 100));
+              setInputLevel(averageLevel);
+              setPeakLevel(peakLevelValue);
               meterUpdatedAtRef.current = now;
             }
 
@@ -911,8 +923,16 @@ export default function Home() {
     }
 
     const rms = Math.sqrt(sum / data.length);
-    const averageLevel = Math.min(1, rms * 3.8);
-    const peakLevelValue = Math.min(1, peak * 1.75);
+    const averageLevel = sampleToMeterPercent(
+      rms,
+      RMS_METER_FLOOR_DB,
+      RMS_METER_CEILING_DB
+    );
+    const peakLevelValue = sampleToMeterPercent(
+      peak,
+      PEAK_METER_FLOOR_DB,
+      PEAK_METER_CEILING_DB
+    );
     const now = performance.now();
 
     context.lineWidth = Math.max(2, width * 0.0036);
@@ -923,8 +943,8 @@ export default function Home() {
     context.shadowBlur = 0;
 
     if (now - meterUpdatedAtRef.current > 80) {
-      setInputLevel(Math.round(averageLevel * 100));
-      setPeakLevel(Math.round(peakLevelValue * 100));
+      setInputLevel(averageLevel);
+      setPeakLevel(peakLevelValue);
       meterUpdatedAtRef.current = now;
     }
 
@@ -974,8 +994,16 @@ export default function Home() {
     }
 
     const rms = Math.sqrt(sum / data.length);
-    const averageLevel = Math.min(1, rms * 3.8);
-    const peakLevelValue = Math.min(1, peak * 1.75);
+    const averageLevel = sampleToMeterPercent(
+      rms,
+      RMS_METER_FLOOR_DB,
+      RMS_METER_CEILING_DB
+    );
+    const peakLevelValue = sampleToMeterPercent(
+      peak,
+      PEAK_METER_FLOOR_DB,
+      PEAK_METER_CEILING_DB
+    );
     const now = performance.now();
 
     context.lineWidth = Math.max(2, width * 0.0036);
@@ -986,8 +1014,8 @@ export default function Home() {
     context.shadowBlur = 0;
 
     if (now - previewMeterUpdatedAtRef.current > 80) {
-      setPlaybackLevel(Math.round(averageLevel * 100));
-      setPlaybackPeakLevel(Math.round(peakLevelValue * 100));
+      setPlaybackLevel(averageLevel);
+      setPlaybackPeakLevel(peakLevelValue);
       previewMeterUpdatedAtRef.current = now;
     }
 
@@ -2137,6 +2165,17 @@ function getStoredSegmentDurationSeconds() {
   } catch {
     return DEFAULT_SEGMENT_DURATION_SECONDS;
   }
+}
+
+function sampleToMeterPercent(value, floorDb, ceilingDb) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  const db = 20 * Math.log10(Math.max(value, 0.000001));
+  const normalized = (db - floorDb) / (ceilingDb - floorDb);
+
+  return Math.round(Math.min(1, Math.max(0, normalized)) * 100);
 }
 
 async function decodeAudioBlob(blob) {
