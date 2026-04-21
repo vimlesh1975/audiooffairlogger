@@ -127,6 +127,54 @@
   gap: 12px;
 }
 
+.listenSwitch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(220, 239, 255, 0.1);
+}
+
+.listenLabel {
+  align-self: center;
+  padding: 0 6px;
+  color: rgba(241, 245, 247, 0.66);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.listenButton {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d7edf3;
+  font-size: 0.94rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+.listenButton:hover {
+  transform: translateY(-1px);
+}
+
+.listenButtonActive {
+  border-color: rgba(153, 230, 248, 0.48);
+  background: rgba(68, 156, 190, 0.28);
+  color: #f4fbfd;
+  box-shadow: 0 0 0 1px rgba(153, 230, 248, 0.12);
+}
+
 .durationControl {
   display: grid;
   gap: 6px;
@@ -784,6 +832,7 @@
   .secondaryButton,
   .ghostButton,
   .secondaryLink,
+  .listenSwitch,
   .durationControl {
     width: 100%;
   }

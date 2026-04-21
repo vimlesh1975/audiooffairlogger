@@ -14,6 +14,7 @@ const DEFAULT_SEGMENT_DURATION_SECONDS = 10;
 const MIN_SEGMENT_DURATION_SECONDS = 1;
 const MAX_SEGMENT_DURATION_SECONDS = 3600;
 const SEGMENT_DURATION_STORAGE_KEY = "audio-offairlogger-segment-duration-seconds";
+const RECORDER_AUDIO_BITS_PER_SECOND = 320_000;
 const RECORDER_MIME_TYPES = [
   "audio/mp4;codecs=mp4a.40.2",
   "audio/mp4",
@@ -29,6 +30,7 @@ export default function Home() {
   const [segmentDurationSeconds, setSegmentDurationSeconds] = useState(
     getStoredSegmentDurationSeconds
   );
+  const [listenSource, setListenSource] = useState("playback");
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecordingUrl, setSelectedRecordingUrl] = useState("");
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
@@ -65,6 +67,7 @@ export default function Home() {
   const previewMeterUpdatedAtRef = useRef(0);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
+  const listenSourceRef = useRef("playback");
   const segmentTickRef = useRef(null);
   const segmentStopTimeoutRef = useRef(null);
   const segmentStartedAtRef = useRef(0);
@@ -78,6 +81,20 @@ export default function Home() {
     item.name.toLowerCase().includes(clipSearch.trim().toLowerCase())
   );
   const segmentDurationMs = segmentDurationSeconds * 1000;
+
+  useEffect(() => {
+    listenSourceRef.current = listenSource;
+    applyAnalyserOutputRouting(
+      analyserRef.current,
+      audioContextRef.current,
+      listenSource === "input"
+    );
+    applyAnalyserOutputRouting(
+      previewAnalyserRef.current,
+      previewAudioContextRef.current,
+      listenSource === "playback"
+    );
+  }, [listenSource]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +117,9 @@ export default function Home() {
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia(
+          getPreferredAudioConstraints()
+        );
 
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -133,6 +152,12 @@ export default function Home() {
           analyserRef.current = analyser;
           waveformDataRef.current = new Uint8Array(analyser.fftSize);
           meterUpdatedAtRef.current = 0;
+
+          applyAnalyserOutputRouting(
+            analyser,
+            context,
+            listenSourceRef.current === "input"
+          );
 
           setInputLevel(0);
           setPeakLevel(0);
@@ -733,6 +758,12 @@ export default function Home() {
     waveformDataRef.current = new Uint8Array(analyser.fftSize);
     meterUpdatedAtRef.current = 0;
 
+    applyAnalyserOutputRouting(
+      analyser,
+      context,
+      listenSourceRef.current === "input"
+    );
+
     setInputLevel(0);
     setPeakLevel(0);
 
@@ -790,7 +821,9 @@ export default function Home() {
       return streamRef.current;
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia(
+      getPreferredAudioConstraints()
+    );
     streamRef.current = stream;
     await refreshSelectedInputDevice(stream);
 
@@ -829,7 +862,11 @@ export default function Home() {
       analyser.smoothingTimeConstant = 0.84;
 
       source.connect(analyser);
-      analyser.connect(context.destination);
+      applyAnalyserOutputRouting(
+        analyser,
+        context,
+        listenSourceRef.current === "playback"
+      );
 
       previewAudioContextRef.current = context;
       previewSourceNodeRef.current = source;
@@ -1222,6 +1259,36 @@ export default function Home() {
 
               <div className={styles.statusRow}>
                 <div className={styles.controls}>
+                  <div
+                    className={styles.listenSwitch}
+                    role="group"
+                    aria-label="Listen source"
+                  >
+                    <span className={styles.listenLabel}>Listen</span>
+
+                    <button
+                      className={`${styles.listenButton} ${
+                        listenSource === "input" ? styles.listenButtonActive : ""
+                      }`}
+                      type="button"
+                      onClick={() => setListenSource("input")}
+                    >
+                      Input
+                    </button>
+
+                    <button
+                      className={`${styles.listenButton} ${
+                        listenSource === "playback"
+                          ? styles.listenButtonActive
+                          : ""
+                      }`}
+                      type="button"
+                      onClick={() => setListenSource("playback")}
+                    >
+                      Playback
+                    </button>
+                  </div>
+
                   <label className={styles.durationControl}>
                     <span className={styles.durationLabel}>Duration (sec)</span>
                     <input
@@ -1480,7 +1547,10 @@ function createRecorder(stream) {
 
     try {
       return {
-        recorder: new MediaRecorder(stream, { mimeType }),
+        recorder: new MediaRecorder(stream, {
+          mimeType,
+          audioBitsPerSecond: RECORDER_AUDIO_BITS_PER_SECOND,
+        }),
         mimeType,
       };
     } catch {
@@ -1489,8 +1559,23 @@ function createRecorder(stream) {
   }
 
   return {
-    recorder: new MediaRecorder(stream),
+    recorder: new MediaRecorder(stream, {
+      audioBitsPerSecond: RECORDER_AUDIO_BITS_PER_SECOND,
+    }),
     mimeType: "",
+  };
+}
+
+function getPreferredAudioConstraints() {
+  return {
+    audio: {
+      channelCount: { ideal: 2 },
+      sampleRate: { ideal: 48000 },
+      sampleSize: { ideal: 24 },
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
   };
 }
 
@@ -1530,6 +1615,32 @@ function clampSegmentDurationSeconds(value) {
     MAX_SEGMENT_DURATION_SECONDS,
     Math.max(MIN_SEGMENT_DURATION_SECONDS, Math.round(numericValue))
   );
+}
+
+function applyAnalyserOutputRouting(analyser, context, shouldOutput) {
+  if (!analyser || !context) {
+    return;
+  }
+
+  try {
+    analyser.disconnect();
+  } catch {
+    // Ignore disconnect issues and try to restore the desired state below.
+  }
+
+  if (!shouldOutput) {
+    return;
+  }
+
+  try {
+    if (context.state === "suspended") {
+      void context.resume().catch(() => {});
+    }
+
+    analyser.connect(context.destination);
+  } catch {
+    // Ignore routing failures so analysis can continue without speaker output.
+  }
 }
 
 function getStoredSegmentDurationSeconds() {

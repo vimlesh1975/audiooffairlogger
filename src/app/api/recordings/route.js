@@ -16,6 +16,7 @@ export const runtime = "nodejs";
 
 const execFileAsync = promisify(execFile);
 const OUTPUT_MIME_TYPE = "audio/mpeg";
+const OUTPUT_MP3_BITRATE = "320k";
 
 export async function GET() {
   try {
@@ -95,7 +96,7 @@ async function convertAudioBufferToMp3({
       "-codec:a",
       "libmp3lame",
       "-b:a",
-      "192k",
+      OUTPUT_MP3_BITRATE,
       outputPath,
     ]);
 
