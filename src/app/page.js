@@ -941,12 +941,14 @@ export default function Home() {
       setErrorMessage(error?.message || "Failed to save the recorded clip.");
     } finally {
       setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
-      setIsRecording(false);
 
       if (shouldContinueRecordingRef.current && streamRef.current?.active) {
+        setIsRecording(true);
         startRecordingSegment(streamRef.current);
         return;
       }
+
+      setIsRecording(false);
 
       if (keepMonitoringInputRef.current && streamRef.current?.active) {
         setIsInputMonitoring(true);
@@ -1341,85 +1343,72 @@ export default function Home() {
                 </div>
               ) : (
                 <div className={styles.previewStack}>
-                  <div className={styles.audioShell}>
-                    {isLoadingPreview ? (
-                      <p className={styles.helperText}>
-                        Loading audio preview...
-                      </p>
-                    ) : selectedRecordingUrl ? (
-                      <audio
-                        key={selectedRecording.id}
-                        ref={previewAudioRef}
-                        className={styles.audioPlayer}
-                        controls
-                        onPlay={handlePreviewPlay}
-                        onPause={handlePreviewPause}
-                        onEnded={handlePreviewPause}
-                        preload="metadata"
-                        src={selectedRecordingUrl}
-                      >
-                        Your browser does not support audio playback.
-                      </audio>
-                    ) : (
-                      <p className={styles.helperText}>
-                        Preview could not be loaded for this saved clip.
-                      </p>
-                    )}
-                  </div>
-
-                  <section
-                    className={`${styles.monitorPanel} ${styles.previewMonitor}`}
-                  >
-                    <div className={styles.monitorHeader}>
-                      <div>
-                        <h3 className={styles.monitorTitle}>Playback Monitor</h3>
-                      </div>
-                      {isPreviewPlaying ? (
-                        <span className={styles.monitorBadge}>Playing</span>
-                      ) : null}
+                  <div className={styles.previewPlaybackRow}>
+                    <div className={`${styles.audioShell} ${styles.playbackSeekCard}`}>
+                      {isLoadingPreview ? (
+                        <p className={styles.helperText}>
+                          Loading audio preview...
+                        </p>
+                      ) : selectedRecordingUrl ? (
+                        <audio
+                          key={selectedRecording.id}
+                          ref={previewAudioRef}
+                          className={styles.audioPlayer}
+                          controls
+                          onPlay={handlePreviewPlay}
+                          onPause={handlePreviewPause}
+                          onEnded={handlePreviewPause}
+                          preload="metadata"
+                          src={selectedRecordingUrl}
+                        >
+                          Your browser does not support audio playback.
+                        </audio>
+                      ) : (
+                        <p className={styles.helperText}>
+                          Preview could not be loaded for this saved clip.
+                        </p>
+                      )}
                     </div>
 
-                    <div className={styles.monitorGrid}>
-                      <div className={styles.levelCard}>
-                        <div className={styles.levelHeader}>
-                          <span className={styles.levelLabel}>
-                            Playback level
-                          </span>
-                          <strong className={styles.levelValue}>
-                            {playbackLevel}%
-                          </strong>
-                        </div>
-
-                        <div className={styles.levelTrack}>
-                          <div
-                            className={styles.levelFillPlayback}
-                            style={{ width: `${playbackLevel}%` }}
-                          />
-                        </div>
-
-                        <div className={styles.levelMeta}>
-                          <span>Average {playbackLevel}%</span>
-                          <span>Peak {playbackPeakLevel}%</span>
-                        </div>
+                    <div className={`${styles.levelCard} ${styles.previewStatCard}`}>
+                      <div className={styles.levelHeader}>
+                        <span className={styles.levelLabel}>
+                          Playback level
+                        </span>
+                        <strong className={styles.levelValue}>
+                          {playbackLevel}%
+                        </strong>
                       </div>
 
-                      <div className={styles.waveformCard}>
-                        <div className={styles.levelHeader}>
-                          <span className={styles.levelLabel}>
-                            Playback waveform
-                          </span>
-                          <strong className={styles.levelValue}>
-                            {isPreviewPlaying ? "Active" : "Standby"}
-                          </strong>
-                        </div>
-
-                        <canvas
-                          ref={previewWaveformCanvasRef}
-                          className={styles.waveformCanvas}
+                      <div className={styles.levelTrack}>
+                        <div
+                          className={styles.levelFillPlayback}
+                          style={{ width: `${playbackLevel}%` }}
                         />
                       </div>
+
+                      <div className={styles.levelMeta}>
+                        <span>Average {playbackLevel}%</span>
+                        <span>Peak {playbackPeakLevel}%</span>
+                      </div>
                     </div>
-                  </section>
+
+                    <div className={`${styles.waveformCard} ${styles.previewWaveformCard}`}>
+                      <div className={styles.levelHeader}>
+                        <span className={styles.levelLabel}>
+                          Playback waveform
+                        </span>
+                        <strong className={styles.levelValue}>
+                          {isPreviewPlaying ? "Active" : "Standby"}
+                        </strong>
+                      </div>
+
+                      <canvas
+                        ref={previewWaveformCanvasRef}
+                        className={styles.waveformCanvas}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
             </article>

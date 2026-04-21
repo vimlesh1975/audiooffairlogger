@@ -261,7 +261,7 @@
 .monitorPanel {
   position: relative;
   z-index: 1;
-  padding: 20px;
+  padding: 16px;
   border-radius: 26px;
   background: rgba(6, 16, 30, 0.32);
   border: 1px solid rgba(202, 245, 255, 0.12);
@@ -319,7 +319,7 @@
 
 .levelCard,
 .waveformCard {
-  padding: 18px;
+  padding: 14px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -386,7 +386,7 @@
 .waveformCanvas {
   display: block;
   width: 100%;
-  height: 150px;
+  height: 110px;
   margin-top: 16px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -425,7 +425,7 @@
 }
 
 .playerColumn {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 3fr) minmax(0, 1fr);
 }
 
 .panel {
@@ -447,7 +447,7 @@
 }
 
 .recordingsDock {
-  max-height: 320px;
+  max-height: none;
 }
 
 .panelHeader {
@@ -534,8 +534,12 @@
 }
 
 .recordingItemActive {
-  border-color: rgba(153, 230, 248, 0.28);
-  background: rgba(33, 92, 117, 0.18);
+  border-color: rgba(153, 230, 248, 0.78);
+  background:
+    linear-gradient(135deg, rgba(38, 112, 142, 0.62), rgba(23, 66, 98, 0.72));
+  box-shadow:
+    0 0 0 1px rgba(153, 230, 248, 0.2),
+    0 14px 28px rgba(7, 26, 40, 0.32);
 }
 
 .recordingButton {
@@ -578,6 +582,30 @@
   gap: 18px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.previewPlaybackRow {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.15fr) minmax(200px, 0.75fr) minmax(240px, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.playbackSeekCard,
+.previewStatCard,
+.previewWaveformCard {
+  min-height: 0;
+}
+
+.playbackSeekCard {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+}
+
+.previewStatCard,
+.previewWaveformCard {
+  padding: 14px;
 }
 
 .previewSummary {
@@ -686,7 +714,8 @@
 
 @media (max-width: 1080px) {
   .metaGrid,
-  .monitorGrid {
+  .monitorGrid,
+  .previewPlaybackRow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -710,7 +739,8 @@
   .metaGrid,
   .monitorGrid,
   .dashboard,
-  .previewInfoGrid {
+  .previewInfoGrid,
+  .previewPlaybackRow {
     grid-template-columns: minmax(0, 1fr);
   }
 
