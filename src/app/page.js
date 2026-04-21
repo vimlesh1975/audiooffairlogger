@@ -22,6 +22,7 @@ const RECORDER_MIME_TYPES = [
 
 export default function Home() {
   const [recordings, setRecordings] = useState([]);
+  const [clipSearch, setClipSearch] = useState("");
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecordingUrl, setSelectedRecordingUrl] = useState("");
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
@@ -67,6 +68,9 @@ export default function Home() {
 
   const selectedRecording =
     recordings.find((item) => item.id === selectedRecordingId) ?? null;
+  const filteredRecordings = recordings.filter((item) =>
+    item.name.toLowerCase().includes(clipSearch.trim().toLowerCase())
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1132,7 +1136,15 @@ export default function Home() {
             <section className={styles.monitorPanel}>
               <div className={styles.monitorHeader}>
                 <div>
-                  <h2 className={styles.monitorTitle}>Audio Input Monitor</h2>
+                  <div className={styles.deviceIdentity}>
+                    <span className={styles.metaLabel}>Input device</span>
+                    <strong
+                      className={styles.deviceValue}
+                      title={selectedInputDeviceName}
+                    >
+                      {selectedInputDeviceName}
+                    </strong>
+                  </div>
                 </div>
               </div>
 
@@ -1181,26 +1193,6 @@ export default function Home() {
 
               <h1 className={styles.title}>Audio Off-Air Logger</h1>
 
-              <div className={styles.metaGrid}>
-                <article className={styles.metaCard}>
-                  <span className={styles.metaLabel}>Input device</span>
-                  <strong
-                    className={styles.metaValue}
-                    title={selectedInputDeviceName}
-                  >
-                    {selectedInputDeviceName}
-                  </strong>
-                </article>
-                <article className={styles.metaCard}>
-                  <span className={styles.metaLabel}>Clip length</span>
-                  <strong className={styles.metaValue}>10 seconds</strong>
-                </article>
-                <article className={styles.metaCard}>
-                  <span className={styles.metaLabel}>Saved clips</span>
-                  <strong className={styles.metaValue}>{recordings.length}</strong>
-                </article>
-              </div>
-
               <div className={styles.statusRow}>
                 <div className={styles.controls}>
                   <button
@@ -1219,15 +1211,6 @@ export default function Home() {
                     disabled={!isRecording}
                   >
                     Stop recording
-                  </button>
-
-                  <button
-                    className={styles.ghostButton}
-                    type="button"
-                    onClick={() => void handleClearAll()}
-                    disabled={recordings.length === 0}
-                  >
-                    Clear saved clips
                   </button>
                 </div>
 
@@ -1268,10 +1251,37 @@ export default function Home() {
           </section>
 
           <section className={styles.playerColumn}>
-            {recordings.length > 0 ? (
-              <article className={`${styles.panel} ${styles.filesPanel} ${styles.recordingsDock}`}>
+            <article className={`${styles.panel} ${styles.filesPanel} ${styles.recordingsDock}`}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <h2 className={styles.panelTitle}>Saved clips</h2>
+                  <p className={styles.panelSubtitle}>
+                    Total clips: {recordings.length} | Search results:{" "}
+                    {filteredRecordings.length}
+                  </p>
+                </div>
+                <button
+                  className={styles.deleteButtonAlt}
+                  type="button"
+                  onClick={() => void handleClearAll()}
+                  disabled={recordings.length === 0}
+                >
+                  Delete all clips
+                </button>
+              </div>
+
+              <input
+                className={styles.searchInput}
+                type="search"
+                value={clipSearch}
+                onChange={(event) => setClipSearch(event.target.value)}
+                placeholder="Search clips"
+                aria-label="Search clips"
+              />
+
+              {filteredRecordings.length > 0 ? (
                 <ul className={styles.recordingList}>
-                  {recordings.map((item) => (
+                  {filteredRecordings.map((item) => (
                     <li
                       key={item.id}
                       className={`${styles.recordingItem} ${
@@ -1287,39 +1297,41 @@ export default function Home() {
                       >
                         <span className={styles.recordingName}>{item.name}</span>
                         <span className={styles.recordingMeta}>
-                          {formatDateTime(item.createdAt)}
+                          {formatDuration(item.durationMs)}
                         </span>
                         <span className={styles.recordingMeta}>
-                          {formatDuration(item.durationMs)} |{" "}
-                          {formatBytes(item.size)} |{" "}
-                          {formatMimeType(item.mimeType)}
+                          {formatBytes(item.size)}
                         </span>
                       </button>
 
-                      <button
-                        className={styles.deleteButton}
-                        type="button"
-                        onClick={() => void handleDelete(item.id)}
-                      >
-                        Delete
-                      </button>
+                      <div className={styles.recordingActions}>
+                        <a
+                          className={styles.secondaryLink}
+                          href={`/api/recordings/${encodeURIComponent(item.id)}`}
+                          download={item.name}
+                        >
+                          Download
+                        </a>
+
+                        <button
+                          className={styles.deleteButton}
+                          type="button"
+                          onClick={() => void handleDelete(item.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
-              </article>
-            ) : null}
+              ) : recordings.length > 0 ? (
+                <div className={styles.emptyState}>
+                  <p>No matching clips.</p>
+                </div>
+              ) : null}
+            </article>
 
             <article className={`${styles.panel} ${styles.playerPanel}`}>
-              <div className={styles.panelHeader}>
-                <div>
-                  <h2 className={styles.panelTitle}>Preview player</h2>
-                  <p className={styles.panelSubtitle}>
-                    Select any saved clip to listen before exporting or deleting
-                    it.
-                  </p>
-                </div>
-              </div>
-
               {!selectedRecording ? (
                 <div className={styles.emptyState}>
                   <p>No clip selected.</p>
@@ -1329,30 +1341,6 @@ export default function Home() {
                 </div>
               ) : (
                 <div className={styles.previewStack}>
-                  <div className={styles.previewSummary}>
-                    <h3 className={styles.previewName}>
-                      {selectedRecording.name}
-                    </h3>
-                    <p className={styles.previewTimestamp}>
-                      Created {formatDateTime(selectedRecording.createdAt)}
-                    </p>
-                  </div>
-
-                  <div className={styles.previewInfoGrid}>
-                    <div className={styles.infoBlock}>
-                      <span className={styles.infoLabel}>Duration</span>
-                      <strong className={styles.infoValue}>
-                        {formatDuration(selectedRecording.durationMs)}
-                      </strong>
-                    </div>
-                    <div className={styles.infoBlock}>
-                      <span className={styles.infoLabel}>File size</span>
-                      <strong className={styles.infoValue}>
-                        {formatBytes(selectedRecording.size)}
-                      </strong>
-                    </div>
-                  </div>
-
                   <div className={styles.audioShell}>
                     {isLoadingPreview ? (
                       <p className={styles.helperText}>
@@ -1385,14 +1373,10 @@ export default function Home() {
                     <div className={styles.monitorHeader}>
                       <div>
                         <h3 className={styles.monitorTitle}>Playback Monitor</h3>
-                        <p className={styles.monitorSubtitle}>
-                          See the selected clip&apos;s output level and waveform
-                          while the preview player is running.
-                        </p>
                       </div>
-                      <span className={styles.monitorBadge}>
-                        {isPreviewPlaying ? "Playing" : "Ready"}
-                      </span>
+                      {isPreviewPlaying ? (
+                        <span className={styles.monitorBadge}>Playing</span>
+                      ) : null}
                     </div>
 
                     <div className={styles.monitorGrid}>
@@ -1433,34 +1417,9 @@ export default function Home() {
                           ref={previewWaveformCanvasRef}
                           className={styles.waveformCanvas}
                         />
-
-                        <p className={styles.monitorHint}>
-                          Press play on the preview player to animate the
-                          playback waveform and level meter.
-                        </p>
                       </div>
                     </div>
                   </section>
-
-                  <div className={styles.previewActions}>
-                    {selectedRecordingUrl ? (
-                      <a
-                        className={styles.secondaryLink}
-                        href={selectedRecordingUrl}
-                        download={selectedRecording.name}
-                      >
-                        Download clip
-                      </a>
-                    ) : null}
-
-                    <button
-                      className={styles.deleteButtonAlt}
-                      type="button"
-                      onClick={() => void handleDelete(selectedRecording.id)}
-                    >
-                      Delete this clip
-                    </button>
-                  </div>
                 </div>
               )}
             </article>
@@ -1515,20 +1474,19 @@ function formatFileTimestamp(value) {
 
   if (Number.isNaN(date.getTime())) {
     return String(value)
-      .replace(/[T\s]+/g, "_")
-      .replace(/[:.]/g, "-")
+      .replace(/\D+/g, "")
+      .slice(0, 14)
       .replace(/Z$/, "");
   }
 
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
-  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
 
-  return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}-${milliseconds}`;
+  return `${day}${month}${year}_${hours}${minutes}${seconds}`;
 }
 
 function formatDateTime(value) {

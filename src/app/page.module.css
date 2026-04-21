@@ -82,7 +82,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
   margin-top: 24px;
 }
@@ -114,9 +114,10 @@
   position: relative;
   z-index: 1;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 20px;
-  flex-wrap: wrap;
   margin-top: 24px;
 }
 
@@ -279,6 +280,20 @@
   letter-spacing: -0.03em;
 }
 
+.deviceIdentity {
+  max-width: 100%;
+  margin-bottom: 14px;
+}
+
+.deviceValue {
+  display: block;
+  margin-top: 8px;
+  color: #f5fbfd;
+  font-size: 1.06rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .monitorSubtitle {
   margin-top: 6px;
   color: rgba(234, 244, 248, 0.68);
@@ -297,7 +312,7 @@
 
 .monitorGrid {
   display: grid;
-  grid-template-columns: minmax(220px, 0.38fr) minmax(0, 0.62fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   margin-top: 20px;
 }
@@ -448,6 +463,28 @@
   letter-spacing: -0.03em;
 }
 
+.searchInput {
+  width: 100%;
+  min-height: 46px;
+  margin-bottom: 18px;
+  padding: 0 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(220, 239, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #eef7fa;
+  font-size: 0.96rem;
+  outline: none;
+}
+
+.searchInput::placeholder {
+  color: rgba(214, 228, 236, 0.52);
+}
+
+.searchInput:focus {
+  border-color: rgba(153, 230, 248, 0.34);
+  box-shadow: 0 0 0 3px rgba(153, 230, 248, 0.08);
+}
+
 .panelSubtitle {
   margin-top: 6px;
   color: rgba(223, 235, 241, 0.66);
@@ -504,7 +541,9 @@
 .recordingButton {
   all: unset;
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 16px;
+  align-items: center;
   min-width: 0;
   cursor: pointer;
 }
@@ -513,13 +552,23 @@
   font-size: 1rem;
   font-weight: 600;
   line-height: 1.45;
-  word-break: break-word;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .recordingMeta {
   color: rgba(214, 228, 236, 0.7);
   font-size: 0.92rem;
   line-height: 1.55;
+  white-space: nowrap;
+}
+
+.recordingActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .previewStack {
@@ -665,10 +714,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .recordingItem {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .deleteButton,
   .deleteButtonAlt,
   .primaryButton,
@@ -681,5 +726,10 @@
   .controls,
   .previewActions {
     width: 100%;
+  }
+
+  .recordingActions .deleteButton,
+  .recordingActions .secondaryLink {
+    width: auto;
   }
 }

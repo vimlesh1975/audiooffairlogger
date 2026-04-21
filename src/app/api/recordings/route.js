@@ -54,7 +54,7 @@ export async function POST(request) {
     });
     const recording = await saveRecordingToDisk({
       buffer: mp3Buffer,
-      fileName: buildMp3FileName(fileName, createdAt),
+      fileName: buildMp3FileName(createdAt),
       createdAt,
       durationMs,
       mimeType: OUTPUT_MIME_TYPE,
@@ -110,13 +110,8 @@ async function convertAudioBufferToMp3({
   }
 }
 
-function buildMp3FileName(fileName, createdAt) {
-  const fallbackName = formatFileTimestamp(createdAt);
-  const safeBaseName = path
-    .basename(String(fileName || "").trim())
-    .replace(/\.[^.]+$/, "");
-
-  return `${safeBaseName || fallbackName}.mp3`;
+function buildMp3FileName(createdAt) {
+  return `${formatFileTimestamp(createdAt)}.mp3`;
 }
 
 function formatFileTimestamp(value) {
@@ -124,20 +119,18 @@ function formatFileTimestamp(value) {
 
   if (Number.isNaN(date.getTime())) {
     return String(value)
-      .replace(/[T\s]+/g, "_")
-      .replace(/[:.]/g, "-")
-      .replace(/Z$/, "") || String(Date.now());
+      .replace(/\D+/g, "")
+      .slice(0, 14) || String(Date.now());
   }
 
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
-  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
 
-  return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}-${milliseconds}`;
+  return `${day}${month}${year}_${hours}${minutes}${seconds}`;
 }
 
 function getInputExtension(inputMimeType, inputFileName) {
