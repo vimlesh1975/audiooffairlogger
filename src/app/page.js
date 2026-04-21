@@ -1630,7 +1630,7 @@ export default function Home() {
                   <div className={styles.levelHeader}>
                     <div className={styles.levelTitleRow}>
                       <span className={styles.levelLabel}>
-                        Input level in dBFS
+                        Input level <span className={styles.dbfsUnit}>dBFS</span>
                       </span>
                       <strong className={styles.levelValue}>
                         {formatDbNumber(inputLevel)}
@@ -1965,7 +1965,8 @@ export default function Home() {
                       <div className={styles.levelHeader}>
                         <div className={styles.levelTitleRow}>
                           <span className={styles.levelLabel}>
-                            Playback level in dBFS
+                            Playback level{" "}
+                            <span className={styles.dbfsUnit}>dBFS</span>
                           </span>
                           <strong className={styles.levelValue}>
                             {formatDbNumber(playbackLevel)}

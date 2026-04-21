@@ -421,6 +421,11 @@
   text-transform: uppercase;
 }
 
+.dbfsUnit {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .levelTitleRow {
   display: flex;
   flex-wrap: wrap;
