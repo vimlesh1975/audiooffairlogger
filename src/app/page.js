@@ -170,42 +170,56 @@ export default function Home() {
     const centerY = height / 2;
     const amplitudeHeight = height * 0.39;
     const columnWidth = width / peaks.length;
-    const waveformGradient = context.createLinearGradient(0, 0, width, 0);
-
-    waveformGradient.addColorStop(0, "rgba(140, 244, 214, 0.96)");
-    waveformGradient.addColorStop(0.58, "rgba(255, 210, 129, 0.98)");
-    waveformGradient.addColorStop(1, "rgba(255, 164, 118, 0.96)");
-
     drawWaveformBackground(context, width, height);
 
-    context.save();
-    context.lineCap = "round";
-    context.lineWidth = Math.max(1, columnWidth * 0.74);
-    context.strokeStyle = waveformGradient;
-    context.shadowBlur = 10;
-    context.shadowColor = "rgba(255, 210, 129, 0.24)";
-    context.beginPath();
+    function strokePeaks(startIndex, endIndex, color, shadowColor) {
+      if (endIndex <= startIndex) {
+        return;
+      }
 
-    for (let index = 0; index < peaks.length; index += 1) {
-      const peak = peaks[index];
-      const minValue = Math.min(-0.012, peak.min);
-      const maxValue = Math.max(0.012, peak.max);
-      const x = ((index + 0.5) / peaks.length) * width;
-      const topY = centerY - maxValue * amplitudeHeight;
-      const bottomY = centerY - minValue * amplitudeHeight;
+      context.save();
+      context.lineCap = "round";
+      context.lineWidth = Math.max(1, columnWidth * 0.74);
+      context.strokeStyle = color;
+      context.shadowBlur = 10;
+      context.shadowColor = shadowColor;
+      context.beginPath();
 
-      context.moveTo(x, topY);
-      context.lineTo(x, bottomY);
+      for (let index = startIndex; index < endIndex; index += 1) {
+        const peak = peaks[index];
+        const minValue = Math.min(-0.012, peak.min);
+        const maxValue = Math.max(0.012, peak.max);
+        const x = ((index + 0.5) / peaks.length) * width;
+        const topY = centerY - maxValue * amplitudeHeight;
+        const bottomY = centerY - minValue * amplitudeHeight;
+
+        context.moveTo(x, topY);
+        context.lineTo(x, bottomY);
+      }
+
+      context.stroke();
+      context.restore();
     }
-
-    context.stroke();
-    context.restore();
 
     const scrubberProgress = Math.min(
       1,
       Math.max(0, waveformScrubberProgressRef.current)
     );
     const scrubberX = scrubberProgress * width;
+    const scrubberPeakIndex = Math.round(scrubberProgress * peaks.length);
+
+    strokePeaks(
+      0,
+      scrubberPeakIndex,
+      "rgba(73, 174, 255, 0.98)",
+      "rgba(73, 174, 255, 0.34)"
+    );
+    strokePeaks(
+      scrubberPeakIndex,
+      peaks.length,
+      "rgba(255, 255, 255, 0.86)",
+      "rgba(255, 255, 255, 0.2)"
+    );
 
     context.save();
     context.strokeStyle = "rgba(255, 247, 234, 0.98)";
