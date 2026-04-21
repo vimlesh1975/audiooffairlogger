@@ -1,21 +1,24 @@
 .page {
-  flex: 1;
   width: 100%;
+  min-height: 100vh;
   display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 40px 24px 56px;
+  padding: 18px;
 }
 
 .shell {
-  width: min(1180px, 100%);
-  display: grid;
-  gap: 24px;
+  width: min(1920px, calc(100vw - 36px));
+  height: min(1080px, calc(100vh - 36px));
+  min-height: 720px;
+  display: flex;
+  overflow: hidden;
 }
 
 .hero {
   position: relative;
   overflow: hidden;
-  padding: 32px;
+  padding: 28px;
   border-radius: 32px;
   background:
     linear-gradient(135deg, rgba(19, 46, 70, 0.96), rgba(22, 103, 124, 0.88)),
@@ -68,20 +71,20 @@
 .lead {
   position: relative;
   z-index: 1;
-  max-width: 64ch;
+  max-width: 58ch;
   margin-top: 18px;
   color: rgba(244, 248, 250, 0.84);
-  font-size: 1.05rem;
-  line-height: 1.75;
+  font-size: 1rem;
+  line-height: 1.7;
 }
 
 .metaGrid {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-top: 28px;
+  margin-top: 24px;
 }
 
 .metaCard {
@@ -114,7 +117,7 @@
   justify-content: space-between;
   gap: 20px;
   flex-wrap: wrap;
-  margin-top: 28px;
+  margin-top: 24px;
 }
 
 .controls {
@@ -257,8 +260,7 @@
 .monitorPanel {
   position: relative;
   z-index: 1;
-  margin-top: 24px;
-  padding: 24px;
+  padding: 20px;
   border-radius: 26px;
   background: rgba(6, 16, 30, 0.32);
   border: 1px solid rgba(202, 245, 255, 0.12);
@@ -295,7 +297,7 @@
 
 .monitorGrid {
   display: grid;
-  grid-template-columns: minmax(240px, 0.38fr) minmax(0, 0.62fr);
+  grid-template-columns: minmax(220px, 0.38fr) minmax(0, 0.62fr);
   gap: 16px;
   margin-top: 20px;
 }
@@ -346,6 +348,16 @@
   transition: width 80ms linear;
 }
 
+.levelFillPlayback {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, rgba(255, 210, 129, 0.96), rgba(255, 164, 118, 0.96));
+  box-shadow: 0 0 24px rgba(255, 210, 129, 0.22);
+  transition: width 80ms linear;
+}
+
 .levelMeta {
   display: flex;
   justify-content: space-between;
@@ -359,7 +371,7 @@
 .waveformCanvas {
   display: block;
   width: 100%;
-  height: 170px;
+  height: 150px;
   margin-top: 16px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -371,19 +383,52 @@
   line-height: 1.65;
 }
 
+.previewMonitor {
+  margin-top: 0;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .dashboard {
   display: grid;
-  grid-template-columns: minmax(320px, 0.95fr) minmax(320px, 1.05fr);
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
   gap: 24px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.recorderColumn,
+.playerColumn {
+  display: grid;
+  gap: 20px;
+  min-height: 0;
+}
+
+.recorderColumn {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.playerColumn {
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .panel {
-  padding: 28px;
+  min-height: 0;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
   border-radius: 30px;
   background: rgba(8, 17, 31, 0.78);
   border: 1px solid rgba(220, 239, 255, 0.08);
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(20px);
+}
+
+.filesPanel,
+.playerPanel {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .panelHeader {
@@ -428,9 +473,10 @@
 .recordingList {
   list-style: none;
   display: flex;
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
-  max-height: 560px;
   overflow: auto;
   padding-right: 4px;
 }
@@ -474,7 +520,11 @@
 
 .previewStack {
   display: grid;
+  flex: 1;
+  min-height: 0;
   gap: 18px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .previewSummary {
@@ -558,21 +608,44 @@
   }
 }
 
+@media (max-width: 1400px) {
+  .page {
+    padding: 14px;
+  }
+
+  .shell {
+    width: min(1920px, calc(100vw - 28px));
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .recorderColumn,
+  .playerColumn {
+    grid-template-rows: auto;
+  }
+}
+
 @media (max-width: 1080px) {
   .metaGrid,
-  .monitorGrid,
-  .dashboard {
+  .monitorGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 720px) {
   .page {
-    padding: 22px 14px 32px;
+    padding: 12px;
   }
 
   .hero,
-  .panel {
+  .panel,
+  .monitorPanel {
     padding: 22px;
     border-radius: 24px;
   }

@@ -1,92 +1,91 @@
-const DB_NAME = "audio-off-air-logger";
-const STORE_NAME = "recordings";
-const DB_VERSION = 1;
+const API_BASE = "/api/recordings";
 
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+async function readJsonResponse(response) {
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null);
+    throw new Error(errorPayload?.error || "Request failed.");
+  }
 
-    request.onupgradeneeded = () => {
-      const database = request.result;
-
-      if (!database.objectStoreNames.contains(STORE_NAME)) {
-        const store = database.createObjectStore(STORE_NAME, { keyPath: "id" });
-        store.createIndex("createdAt", "createdAt", { unique: false });
-      }
-    };
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
-}
-
-function waitForTransaction(transaction) {
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error);
-  });
-}
-
-function runRequest(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+  return response.json();
 }
 
 export async function saveRecording(entry) {
-  const database = await openDatabase();
-  const transaction = database.transaction(STORE_NAME, "readwrite");
-  const store = transaction.objectStore(STORE_NAME);
+  const formData = new FormData();
 
-  await runRequest(store.put(entry));
-  await waitForTransaction(transaction);
+  formData.append(
+    "file",
+    entry.blob,
+    entry.name || `${formatFallbackFileTimestamp()}.mp3`
+  );
+  formData.append("fileName", entry.name || "");
+  formData.append("createdAt", entry.createdAt || new Date().toISOString());
+  formData.append("durationMs", String(entry.durationMs || 0));
+  formData.append("mimeType", entry.mimeType || entry.blob?.type || "");
+
+  const response = await fetch(API_BASE, {
+    method: "POST",
+    body: formData,
+  });
+
+  return readJsonResponse(response);
 }
 
 export async function getAllRecordings() {
-  const database = await openDatabase();
-  const transaction = database.transaction(STORE_NAME, "readonly");
-  const store = transaction.objectStore(STORE_NAME);
-  const results = await runRequest(store.getAll());
+  const response = await fetch(API_BASE, {
+    cache: "no-store",
+  });
 
-  await waitForTransaction(transaction);
-
-  return results
-    .map(({ blob, ...metadata }) => metadata)
-    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+  const payload = await readJsonResponse(response);
+  return payload.recordings ?? [];
 }
 
 export async function getRecordingById(id) {
-  const database = await openDatabase();
-  const transaction = database.transaction(STORE_NAME, "readonly");
-  const store = transaction.objectStore(STORE_NAME);
-  const result = await runRequest(store.get(id));
+  const response = await fetch(`${API_BASE}/${encodeURIComponent(id)}`, {
+    cache: "no-store",
+  });
 
-  await waitForTransaction(transaction);
+  if (response.status === 404) {
+    return null;
+  }
 
-  return result ?? null;
+  if (!response.ok) {
+    throw new Error("Failed to load the selected recording.");
+  }
+
+  const blob = await response.blob();
+
+  return {
+    id,
+    mimeType: response.headers.get("content-type") || blob.type || "",
+    blob,
+  };
 }
 
 export async function deleteRecordingById(id) {
-  const database = await openDatabase();
-  const transaction = database.transaction(STORE_NAME, "readwrite");
-  const store = transaction.objectStore(STORE_NAME);
+  const response = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 
-  await runRequest(store.delete(id));
-  await waitForTransaction(transaction);
+  return readJsonResponse(response);
 }
 
 export async function clearAllRecordings() {
-  const database = await openDatabase();
-  const transaction = database.transaction(STORE_NAME, "readwrite");
-  const store = transaction.objectStore(STORE_NAME);
+  const response = await fetch(API_BASE, {
+    method: "DELETE",
+  });
 
-  await runRequest(store.clear());
-  await waitForTransaction(transaction);
+  return readJsonResponse(response);
+}
+
+function formatFallbackFileTimestamp() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
+
+  return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}-${milliseconds}`;
 }

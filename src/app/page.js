@@ -24,12 +24,16 @@ export default function Home() {
   const [recordings, setRecordings] = useState([]);
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecordingUrl, setSelectedRecordingUrl] = useState("");
-  const [selectedRecordingType, setSelectedRecordingType] = useState("");
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isInputMonitoring, setIsInputMonitoring] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
   const [peakLevel, setPeakLevel] = useState(0);
-  const [captureMimeType, setCaptureMimeType] = useState("");
+  const [playbackLevel, setPlaybackLevel] = useState(0);
+  const [playbackPeakLevel, setPlaybackPeakLevel] = useState(0);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const [selectedInputDeviceName, setSelectedInputDeviceName] =
+    useState("Default microphone");
   const [segmentsThisSession, setSegmentsThisSession] = useState(0);
   const [timeUntilNextSaveMs, setTimeUntilNextSaveMs] =
     useState(SEGMENT_DURATION_MS);
@@ -43,11 +47,21 @@ export default function Home() {
   const waveformDataRef = useRef(null);
   const animationFrameRef = useRef(null);
   const meterUpdatedAtRef = useRef(0);
+  const previewAudioRef = useRef(null);
+  const previewAudioContextRef = useRef(null);
+  const previewAnalyserRef = useRef(null);
+  const previewSourceNodeRef = useRef(null);
+  const previewSourceElementRef = useRef(null);
+  const previewWaveformCanvasRef = useRef(null);
+  const previewWaveformDataRef = useRef(null);
+  const previewAnimationFrameRef = useRef(null);
+  const previewMeterUpdatedAtRef = useRef(0);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const segmentTickRef = useRef(null);
   const segmentStopTimeoutRef = useRef(null);
   const segmentStartedAtRef = useRef(0);
+  const keepMonitoringInputRef = useRef(true);
   const shouldContinueRecordingRef = useRef(false);
   const segmentNumberRef = useRef(0);
 
@@ -68,10 +82,163 @@ export default function Home() {
       setSelectedRecordingId(items[0]?.id ?? null);
     }
 
+    async function bootstrapInputMonitoring() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setErrorMessage("This browser cannot access the microphone recorder APIs.");
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        streamRef.current = stream;
+        await refreshSelectedInputDevice(stream);
+
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+          if (!AudioContextClass) {
+            drawIdleWaveform();
+            setIsInputMonitoring(true);
+            return;
+          }
+
+          const context = new AudioContextClass();
+          const source = context.createMediaStreamSource(stream);
+          const analyser = context.createAnalyser();
+
+          analyser.fftSize = 2048;
+          analyser.smoothingTimeConstant = 0.84;
+
+          source.connect(analyser);
+
+          audioContextRef.current = context;
+          sourceNodeRef.current = source;
+          analyserRef.current = analyser;
+          waveformDataRef.current = new Uint8Array(analyser.fftSize);
+          meterUpdatedAtRef.current = 0;
+
+          setInputLevel(0);
+          setPeakLevel(0);
+
+          if (context.state === "suspended") {
+            void context.resume().catch(() => {});
+          }
+
+          function renderInitialWaveform() {
+            const canvas = waveformCanvasRef.current;
+            const data = waveformDataRef.current;
+
+            if (!analyserRef.current || !canvas || !data) {
+              drawIdleWaveform();
+              return;
+            }
+
+            const preparedCanvas = prepareCanvas(canvas);
+
+            if (!preparedCanvas) {
+              return;
+            }
+
+            const { context: canvasContext, width, height } = preparedCanvas;
+
+            analyserRef.current.getByteTimeDomainData(data);
+            drawWaveformBackground(canvasContext, width, height);
+
+            let sum = 0;
+            let peak = 0;
+
+            canvasContext.beginPath();
+
+            for (let index = 0; index < data.length; index += 1) {
+              const normalized = (data[index] - 128) / 128;
+              const amplitude = Math.abs(normalized);
+              const x = (index / (data.length - 1)) * width;
+              const y = height / 2 + normalized * (height * 0.34);
+
+              sum += normalized * normalized;
+              peak = Math.max(peak, amplitude);
+
+              if (index === 0) {
+                canvasContext.moveTo(x, y);
+              } else {
+                canvasContext.lineTo(x, y);
+              }
+            }
+
+            const rms = Math.sqrt(sum / data.length);
+            const averageLevel = Math.min(1, rms * 3.8);
+            const peakLevelValue = Math.min(1, peak * 1.75);
+            const now = performance.now();
+
+            canvasContext.lineWidth = Math.max(2, width * 0.0036);
+            canvasContext.strokeStyle = "rgba(140, 244, 214, 0.98)";
+            canvasContext.shadowBlur = 14;
+            canvasContext.shadowColor = "rgba(140, 244, 214, 0.42)";
+            canvasContext.stroke();
+            canvasContext.shadowBlur = 0;
+
+            if (now - meterUpdatedAtRef.current > 80) {
+              setInputLevel(Math.round(averageLevel * 100));
+              setPeakLevel(Math.round(peakLevelValue * 100));
+              meterUpdatedAtRef.current = now;
+            }
+
+            animationFrameRef.current =
+              window.requestAnimationFrame(renderInitialWaveform);
+          }
+
+          renderInitialWaveform();
+        } catch {
+          clearVisualizerFrame();
+
+          if (sourceNodeRef.current) {
+            sourceNodeRef.current.disconnect();
+            sourceNodeRef.current = null;
+          }
+
+          if (analyserRef.current) {
+            analyserRef.current.disconnect();
+            analyserRef.current = null;
+          }
+
+          if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+            void audioContextRef.current.close().catch(() => {});
+          }
+
+          audioContextRef.current = null;
+          waveformDataRef.current = null;
+          meterUpdatedAtRef.current = 0;
+          setInputLevel(0);
+          setPeakLevel(0);
+          drawIdleWaveform();
+        }
+
+        setIsInputMonitoring(true);
+      } catch (error) {
+        if (!cancelled) {
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+          }
+
+          setIsInputMonitoring(false);
+          setErrorMessage(getRecorderError(error));
+        }
+      }
+    }
+
     void loadInitialRecordings();
+    void bootstrapInputMonitoring();
 
     return () => {
       cancelled = true;
+      keepMonitoringInputRef.current = false;
       shouldContinueRecordingRef.current = false;
       clearVisualizerFrame();
 
@@ -92,6 +259,34 @@ export default function Home() {
       audioContextRef.current = null;
       waveformDataRef.current = null;
       meterUpdatedAtRef.current = 0;
+
+      if (previewAnimationFrameRef.current) {
+        window.cancelAnimationFrame(previewAnimationFrameRef.current);
+        previewAnimationFrameRef.current = null;
+      }
+
+      if (previewSourceNodeRef.current) {
+        previewSourceNodeRef.current.disconnect();
+        previewSourceNodeRef.current = null;
+      }
+
+      if (previewAnalyserRef.current) {
+        previewAnalyserRef.current.disconnect();
+        previewAnalyserRef.current = null;
+      }
+
+      if (
+        previewAudioContextRef.current &&
+        previewAudioContextRef.current.state !== "closed"
+      ) {
+        void previewAudioContextRef.current.close().catch(() => {});
+      }
+
+      previewAudioContextRef.current = null;
+      previewSourceElementRef.current = null;
+      previewWaveformDataRef.current = null;
+      previewMeterUpdatedAtRef.current = 0;
+      setIsInputMonitoring(false);
       clearSegmentStopTimeout();
       clearSegmentTick();
       stopStream();
@@ -100,10 +295,15 @@ export default function Home() {
 
   useEffect(() => {
     drawIdleWaveform();
+    drawIdlePreviewWaveform();
 
     function handleResize() {
       if (!analyserRef.current) {
         drawIdleWaveform();
+      }
+
+      if (!previewAnalyserRef.current) {
+        drawIdlePreviewWaveform();
       }
     }
 
@@ -115,11 +315,60 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener) {
+      return;
+    }
+
+    function handleDeviceChange() {
+      if (streamRef.current?.active) {
+        void refreshSelectedInputDevice(streamRef.current);
+      }
+    }
+
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+
+    return () => {
+      navigator.mediaDevices.removeEventListener(
+        "devicechange",
+        handleDeviceChange
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadPreview() {
+      previewAudioRef.current?.pause();
+      clearPreviewVisualizerFrame();
+
+      if (previewSourceNodeRef.current) {
+        previewSourceNodeRef.current.disconnect();
+        previewSourceNodeRef.current = null;
+      }
+
+      if (previewAnalyserRef.current) {
+        previewAnalyserRef.current.disconnect();
+        previewAnalyserRef.current = null;
+      }
+
+      if (
+        previewAudioContextRef.current &&
+        previewAudioContextRef.current.state !== "closed"
+      ) {
+        void previewAudioContextRef.current.close().catch(() => {});
+      }
+
+      previewAudioContextRef.current = null;
+      previewSourceElementRef.current = null;
+      previewWaveformDataRef.current = null;
+      previewMeterUpdatedAtRef.current = 0;
+      setPlaybackLevel(0);
+      setPlaybackPeakLevel(0);
+      setIsPreviewPlaying(false);
+      drawIdlePreviewWaveform();
+
       if (!selectedRecordingId) {
-        setSelectedRecordingType("");
         setSelectedRecordingUrl((currentUrl) => {
           if (currentUrl) {
             URL.revokeObjectURL(currentUrl);
@@ -140,7 +389,6 @@ export default function Home() {
         }
 
         if (!entry) {
-          setSelectedRecordingType("");
           setSelectedRecordingUrl((currentUrl) => {
             if (currentUrl) {
               URL.revokeObjectURL(currentUrl);
@@ -153,7 +401,6 @@ export default function Home() {
 
         const previewUrl = URL.createObjectURL(entry.blob);
 
-        setSelectedRecordingType(entry.mimeType || entry.blob.type || "");
         setSelectedRecordingUrl((currentUrl) => {
           if (currentUrl) {
             URL.revokeObjectURL(currentUrl);
@@ -214,6 +461,13 @@ export default function Home() {
     }
   }
 
+  function clearPreviewVisualizerFrame() {
+    if (previewAnimationFrameRef.current) {
+      window.cancelAnimationFrame(previewAnimationFrameRef.current);
+      previewAnimationFrameRef.current = null;
+    }
+  }
+
   function clearSegmentStopTimeout() {
     if (segmentStopTimeoutRef.current) {
       window.clearTimeout(segmentStopTimeoutRef.current);
@@ -226,6 +480,43 @@ export default function Home() {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+  }
+
+  function releaseInputStream() {
+    teardownVisualizer();
+    stopStream();
+    setIsInputMonitoring(false);
+  }
+
+  async function refreshSelectedInputDevice(stream = streamRef.current) {
+    const activeTrack = stream?.getAudioTracks?.()[0];
+
+    if (!activeTrack) {
+      setSelectedInputDeviceName("Default microphone");
+      return;
+    }
+
+    const settings = activeTrack.getSettings?.() ?? {};
+    const activeDeviceId = settings.deviceId || "";
+    let deviceName = activeTrack.label?.trim() || "Default microphone";
+
+    if (navigator.mediaDevices?.enumerateDevices) {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const matchingDevice = devices.find(
+          (device) =>
+            device.kind === "audioinput" && device.deviceId === activeDeviceId
+        );
+
+        if (matchingDevice?.label) {
+          deviceName = matchingDevice.label;
+        }
+      } catch {
+        // Keep the current track label as the best available fallback.
+      }
+    }
+
+    setSelectedInputDeviceName(deviceName);
   }
 
   function drawIdleWaveform() {
@@ -247,6 +538,31 @@ export default function Home() {
 
     context.lineWidth = Math.max(2, width * 0.003);
     context.strokeStyle = "rgba(186, 238, 255, 0.5)";
+    context.beginPath();
+    context.moveTo(0, height / 2);
+    context.lineTo(width, height / 2);
+    context.stroke();
+  }
+
+  function drawIdlePreviewWaveform() {
+    const canvas = previewWaveformCanvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const preparedCanvas = prepareCanvas(canvas);
+
+    if (!preparedCanvas) {
+      return;
+    }
+
+    const { context, width, height } = preparedCanvas;
+
+    drawWaveformBackground(context, width, height);
+
+    context.lineWidth = Math.max(2, width * 0.003);
+    context.strokeStyle = "rgba(255, 210, 129, 0.54)";
     context.beginPath();
     context.moveTo(0, height / 2);
     context.lineTo(width, height / 2);
@@ -316,6 +632,71 @@ export default function Home() {
     animationFrameRef.current = window.requestAnimationFrame(drawWaveformFrame);
   }
 
+  function drawPreviewWaveformFrame() {
+    const analyser = previewAnalyserRef.current;
+    const canvas = previewWaveformCanvasRef.current;
+    const data = previewWaveformDataRef.current;
+
+    if (!analyser || !canvas || !data) {
+      drawIdlePreviewWaveform();
+      return;
+    }
+
+    const preparedCanvas = prepareCanvas(canvas);
+
+    if (!preparedCanvas) {
+      return;
+    }
+
+    const { context, width, height } = preparedCanvas;
+
+    analyser.getByteTimeDomainData(data);
+    drawWaveformBackground(context, width, height);
+
+    let sum = 0;
+    let peak = 0;
+
+    context.beginPath();
+
+    for (let index = 0; index < data.length; index += 1) {
+      const normalized = (data[index] - 128) / 128;
+      const amplitude = Math.abs(normalized);
+      const x = (index / (data.length - 1)) * width;
+      const y = height / 2 + normalized * (height * 0.34);
+
+      sum += normalized * normalized;
+      peak = Math.max(peak, amplitude);
+
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    }
+
+    const rms = Math.sqrt(sum / data.length);
+    const averageLevel = Math.min(1, rms * 3.8);
+    const peakLevelValue = Math.min(1, peak * 1.75);
+    const now = performance.now();
+
+    context.lineWidth = Math.max(2, width * 0.0036);
+    context.strokeStyle = "rgba(255, 210, 129, 0.98)";
+    context.shadowBlur = 14;
+    context.shadowColor = "rgba(255, 210, 129, 0.4)";
+    context.stroke();
+    context.shadowBlur = 0;
+
+    if (now - previewMeterUpdatedAtRef.current > 80) {
+      setPlaybackLevel(Math.round(averageLevel * 100));
+      setPlaybackPeakLevel(Math.round(peakLevelValue * 100));
+      previewMeterUpdatedAtRef.current = now;
+    }
+
+    previewAnimationFrameRef.current = window.requestAnimationFrame(
+      drawPreviewWaveformFrame
+    );
+  }
+
   function setupVisualizer(stream) {
     teardownVisualizer(false);
 
@@ -379,6 +760,138 @@ export default function Home() {
     }
   }
 
+  async function ensureInputStream() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("This browser cannot access the microphone recorder APIs.");
+    }
+
+    if (streamRef.current?.active) {
+      await refreshSelectedInputDevice(streamRef.current);
+
+      if (!analyserRef.current) {
+        try {
+          setupVisualizer(streamRef.current);
+        } catch {
+          teardownVisualizer();
+        }
+      }
+
+      return streamRef.current;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = stream;
+    await refreshSelectedInputDevice(stream);
+
+    try {
+      setupVisualizer(stream);
+    } catch {
+      teardownVisualizer();
+    }
+
+    return stream;
+  }
+
+  function setupPreviewVisualizer() {
+    const audioElement = previewAudioRef.current;
+
+    if (!audioElement) {
+      drawIdlePreviewWaveform();
+      return;
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+      drawIdlePreviewWaveform();
+      return;
+    }
+
+    if (previewSourceElementRef.current !== audioElement) {
+      teardownPreviewVisualizer(false);
+
+      const context = new AudioContextClass();
+      const source = context.createMediaElementSource(audioElement);
+      const analyser = context.createAnalyser();
+
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.84;
+
+      source.connect(analyser);
+      analyser.connect(context.destination);
+
+      previewAudioContextRef.current = context;
+      previewSourceNodeRef.current = source;
+      previewAnalyserRef.current = analyser;
+      previewSourceElementRef.current = audioElement;
+      previewWaveformDataRef.current = new Uint8Array(analyser.fftSize);
+    }
+
+    const context = previewAudioContextRef.current;
+
+    if (context?.state === "suspended") {
+      void context.resume().catch(() => {});
+    }
+
+    clearPreviewVisualizerFrame();
+    previewMeterUpdatedAtRef.current = 0;
+    setPlaybackLevel(0);
+    setPlaybackPeakLevel(0);
+    drawPreviewWaveformFrame();
+  }
+
+  function teardownPreviewVisualizer(resetMeters = true) {
+    clearPreviewVisualizerFrame();
+
+    if (previewSourceNodeRef.current) {
+      previewSourceNodeRef.current.disconnect();
+      previewSourceNodeRef.current = null;
+    }
+
+    if (previewAnalyserRef.current) {
+      previewAnalyserRef.current.disconnect();
+      previewAnalyserRef.current = null;
+    }
+
+    if (
+      previewAudioContextRef.current &&
+      previewAudioContextRef.current.state !== "closed"
+    ) {
+      void previewAudioContextRef.current.close().catch(() => {});
+    }
+
+    previewAudioContextRef.current = null;
+    previewSourceElementRef.current = null;
+    previewWaveformDataRef.current = null;
+    previewMeterUpdatedAtRef.current = 0;
+
+    if (resetMeters) {
+      setPlaybackLevel(0);
+      setPlaybackPeakLevel(0);
+      setIsPreviewPlaying(false);
+      drawIdlePreviewWaveform();
+    }
+  }
+
+  function stopPreviewVisualizer(resetMeters = true) {
+    clearPreviewVisualizerFrame();
+
+    if (
+      previewAudioContextRef.current &&
+      previewAudioContextRef.current.state === "running"
+    ) {
+      void previewAudioContextRef.current.suspend().catch(() => {});
+    }
+
+    if (resetMeters) {
+      setPlaybackLevel(0);
+      setPlaybackPeakLevel(0);
+      drawIdlePreviewWaveform();
+    }
+
+    setIsPreviewPlaying(false);
+  }
+
   function startSegmentTick() {
     clearSegmentTick();
     setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
@@ -405,7 +918,7 @@ export default function Home() {
 
     const entry = {
       id: crypto.randomUUID(),
-      name: buildFileName(createdAt, segmentNumber, mimeType),
+      name: buildFileName(createdAt),
       createdAt,
       durationMs,
       size: blob.size,
@@ -424,15 +937,19 @@ export default function Home() {
       setErrorMessage(error?.message || "Failed to save the recorded clip.");
     } finally {
       setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
+      setIsRecording(false);
 
       if (shouldContinueRecordingRef.current && streamRef.current?.active) {
         startRecordingSegment(streamRef.current);
         return;
       }
 
-      teardownVisualizer();
-      stopStream();
-      setIsRecording(false);
+      if (keepMonitoringInputRef.current && streamRef.current?.active) {
+        setIsInputMonitoring(true);
+        return;
+      }
+
+      releaseInputStream();
     }
   }
 
@@ -442,10 +959,15 @@ export default function Home() {
     clearSegmentTick();
     segmentStartedAtRef.current = 0;
     recorderRef.current = null;
-    teardownVisualizer();
-    stopStream();
     setIsRecording(false);
     setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
+
+    if (keepMonitoringInputRef.current && streamRef.current?.active) {
+      setIsInputMonitoring(true);
+    } else {
+      releaseInputStream();
+    }
+
     setErrorMessage(message);
   }
 
@@ -456,9 +978,6 @@ export default function Home() {
 
     recorderRef.current = recorder;
     segmentStartedAtRef.current = Date.now();
-    setCaptureMimeType(
-      recorder.mimeType || recorderConfig.mimeType || "audio/webm"
-    );
 
     recorder.ondataavailable = (event) => {
       if (event.data && event.data.size > 0) {
@@ -520,30 +1039,22 @@ export default function Home() {
     setErrorMessage("");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      try {
-        setupVisualizer(stream);
-      } catch {
-        teardownVisualizer();
-      }
-
+      const stream = await ensureInputStream();
       shouldContinueRecordingRef.current = true;
       segmentNumberRef.current = 0;
       setSegmentsThisSession(0);
       setSessionStartedAt(new Date().toISOString());
       setIsRecording(true);
+      setIsInputMonitoring(true);
       startRecordingSegment(stream);
     } catch (error) {
       shouldContinueRecordingRef.current = false;
       clearSegmentStopTimeout();
       clearSegmentTick();
       segmentStartedAtRef.current = 0;
-      teardownVisualizer();
-      stopStream();
       recorderRef.current = null;
       setIsRecording(false);
+      releaseInputStream();
       setErrorMessage(getRecorderError(error));
     }
   }
@@ -557,23 +1068,43 @@ export default function Home() {
     if (!recorder) {
       clearSegmentTick();
       segmentStartedAtRef.current = 0;
-      teardownVisualizer();
-      stopStream();
       setIsRecording(false);
+
+      if (!keepMonitoringInputRef.current) {
+        releaseInputStream();
+      }
+
       return;
     }
 
     if (recorder.state === "inactive") {
       clearSegmentTick();
       segmentStartedAtRef.current = 0;
-      teardownVisualizer();
-      stopStream();
       recorderRef.current = null;
       setIsRecording(false);
+
+      if (!keepMonitoringInputRef.current) {
+        releaseInputStream();
+      }
+
       return;
     }
 
     recorder.stop();
+  }
+
+  function handlePreviewPlay() {
+    setIsPreviewPlaying(true);
+
+    try {
+      setupPreviewVisualizer();
+    } catch {
+      stopPreviewVisualizer();
+    }
+  }
+
+  function handlePreviewPause() {
+    stopPreviewVisualizer();
   }
 
   async function handleDelete(recordingId) {
@@ -583,7 +1114,6 @@ export default function Home() {
 
   async function handleClearAll() {
     await clearAllRecordings();
-    setSelectedRecordingType("");
     setSelectedRecordingUrl((currentUrl) => {
       if (currentUrl) {
         URL.revokeObjectURL(currentUrl);
@@ -597,315 +1127,345 @@ export default function Home() {
   return (
     <main className={styles.page}>
       <section className={styles.shell}>
-        <header className={styles.hero}>
-          <div className={styles.heroGlow} />
-          <span className={styles.badge}>
-            {isRecording ? "Recording live" : "Mic recorder ready"}
-          </span>
-
-          <h1 className={styles.title}>Audio Off-Air Logger</h1>
-          <p className={styles.lead}>
-            Record the default audio input continuously in 10-second clips, keep a
-            saved list in the browser, and click any clip to preview it instantly.
-          </p>
-
-          <div className={styles.metaGrid}>
-            <article className={styles.metaCard}>
-              <span className={styles.metaLabel}>Input</span>
-              <strong className={styles.metaValue}>Default microphone</strong>
-            </article>
-            <article className={styles.metaCard}>
-              <span className={styles.metaLabel}>Clip length</span>
-              <strong className={styles.metaValue}>10 seconds</strong>
-            </article>
-            <article className={styles.metaCard}>
-              <span className={styles.metaLabel}>Saved clips</span>
-              <strong className={styles.metaValue}>{recordings.length}</strong>
-            </article>
-            <article className={styles.metaCard}>
-              <span className={styles.metaLabel}>Capture format</span>
-              <strong className={styles.metaValue}>
-                {captureMimeType
-                  ? formatMimeType(captureMimeType)
-                  : "Auto on start"}
-              </strong>
-            </article>
-          </div>
-
-          <div className={styles.statusRow}>
-            <div className={styles.controls}>
-              <button
-                className={styles.primaryButton}
-                type="button"
-                onClick={startRecording}
-                disabled={isRecording}
-              >
-                Start recording
-              </button>
-
-              <button
-                className={styles.secondaryButton}
-                type="button"
-                onClick={stopRecording}
-                disabled={!isRecording}
-              >
-                Stop recording
-              </button>
-
-              <button
-                className={styles.ghostButton}
-                type="button"
-                onClick={() => void handleClearAll()}
-                disabled={recordings.length === 0}
-              >
-                Clear saved clips
-              </button>
-            </div>
-
-            <div className={styles.liveStatus}>
-              <span className={styles.livePill}>
-                <span className={styles.liveDot} />
-                {isRecording
-                  ? `Next save in ${formatClock(timeUntilNextSaveMs)}`
-                  : "Waiting for microphone access"}
-              </span>
-
-              <span className={styles.sessionText}>
-                {sessionStartedAt
-                  ? `This session saved ${segmentsThisSession} clip${
-                      segmentsThisSession === 1 ? "" : "s"
-                    }`
-                  : "Files stay on this device in IndexedDB storage"}
-              </span>
-            </div>
-          </div>
-
-          <section className={styles.monitorPanel}>
-            <div className={styles.monitorHeader}>
-              <div>
-                <h2 className={styles.monitorTitle}>Audio Input Monitor</h2>
-                <p className={styles.monitorSubtitle}>
-                  Watch the live mic level and waveform while the recorder is
-                  capturing audio.
-                </p>
-              </div>
-              <span className={styles.monitorBadge}>
-                {isRecording ? "Live signal" : "Idle"}
-              </span>
-            </div>
-
-            <div className={styles.monitorGrid}>
-              <div className={styles.levelCard}>
-                <div className={styles.levelHeader}>
-                  <span className={styles.levelLabel}>Input level</span>
-                  <strong className={styles.levelValue}>{inputLevel}%</strong>
-                </div>
-
-                <div className={styles.levelTrack}>
-                  <div
-                    className={styles.levelFill}
-                    style={{ width: `${inputLevel}%` }}
-                  />
-                </div>
-
-                <div className={styles.levelMeta}>
-                  <span>Average {inputLevel}%</span>
-                  <span>Peak {peakLevel}%</span>
-                </div>
-              </div>
-
-              <div className={styles.waveformCard}>
-                <div className={styles.levelHeader}>
-                  <span className={styles.levelLabel}>Waveform</span>
-                  <strong className={styles.levelValue}>
-                    {isRecording ? "Listening" : "Standby"}
-                  </strong>
-                </div>
-
-                <canvas
-                  ref={waveformCanvasRef}
-                  className={styles.waveformCanvas}
-                />
-
-                <p className={styles.monitorHint}>
-                  The waveform and level meter become active as soon as microphone
-                  access is granted.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {captureMimeType && !captureMimeType.includes("mp4") ? (
-            <p className={styles.warning}>
-              MP4 recording is not exposed by this browser, so the logger will
-              fall back to WebM. Safari usually offers the best MP4 support.
-            </p>
-          ) : null}
-
-          {errorMessage ? <p className={styles.error}>{errorMessage}</p> : null}
-        </header>
-
         <section className={styles.dashboard}>
-          <article className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2 className={styles.panelTitle}>Recorded files</h2>
-                <p className={styles.panelSubtitle}>
-                  New clips appear automatically every 10 seconds while recording.
-                </p>
+          <section className={styles.recorderColumn}>
+            <section className={styles.monitorPanel}>
+              <div className={styles.monitorHeader}>
+                <div>
+                  <h2 className={styles.monitorTitle}>Audio Input Monitor</h2>
+                </div>
               </div>
-              <span className={styles.listCount}>
-                {recordings.length} item{recordings.length === 1 ? "" : "s"}
-              </span>
-            </div>
 
-            {recordings.length === 0 ? (
-              <div className={styles.emptyState}>
-                <p>No recordings saved yet.</p>
-                <p>
-                  Press <strong>Start recording</strong> to request microphone
-                  access and begin logging 10-second clips.
-                </p>
+              <div className={styles.monitorGrid}>
+                <div className={styles.levelCard}>
+                  <div className={styles.levelHeader}>
+                    <span className={styles.levelLabel}>Input level</span>
+                    <strong className={styles.levelValue}>{inputLevel}%</strong>
+                  </div>
+
+                  <div className={styles.levelTrack}>
+                    <div
+                      className={styles.levelFill}
+                      style={{ width: `${inputLevel}%` }}
+                    />
+                  </div>
+
+                  <div className={styles.levelMeta}>
+                    <span>Average {inputLevel}%</span>
+                    <span>Peak {peakLevel}%</span>
+                  </div>
+                </div>
+
+                <div className={styles.waveformCard}>
+                  <div className={styles.levelHeader}>
+                    <span className={styles.levelLabel}>Waveform</span>
+                    <strong className={styles.levelValue}>
+                      {isInputMonitoring ? "Listening" : "Standby"}
+                    </strong>
+                  </div>
+
+                  <canvas
+                    ref={waveformCanvasRef}
+                    className={styles.waveformCanvas}
+                  />
+
+                </div>
               </div>
-            ) : (
-              <ul className={styles.recordingList}>
-                {recordings.map((item) => (
-                  <li
-                    key={item.id}
-                    className={`${styles.recordingItem} ${
-                      selectedRecordingId === item.id
-                        ? styles.recordingItemActive
-                        : ""
-                    }`}
+            </section>
+
+            <header className={styles.hero}>
+              <div className={styles.heroGlow} />
+              {isRecording ? (
+                <span className={styles.badge}>Recording live</span>
+              ) : null}
+
+              <h1 className={styles.title}>Audio Off-Air Logger</h1>
+
+              <div className={styles.metaGrid}>
+                <article className={styles.metaCard}>
+                  <span className={styles.metaLabel}>Input device</span>
+                  <strong
+                    className={styles.metaValue}
+                    title={selectedInputDeviceName}
                   >
-                    <button
-                      className={styles.recordingButton}
-                      type="button"
-                      onClick={() => setSelectedRecordingId(item.id)}
-                    >
-                      <span className={styles.recordingName}>{item.name}</span>
-                      <span className={styles.recordingMeta}>
-                        {formatDateTime(item.createdAt)}
-                      </span>
-                      <span className={styles.recordingMeta}>
-                        {formatDuration(item.durationMs)} | {formatBytes(item.size)} |{" "}
-                        {formatMimeType(item.mimeType)}
-                      </span>
-                    </button>
-
-                    <button
-                      className={styles.deleteButton}
-                      type="button"
-                      onClick={() => void handleDelete(item.id)}
-                    >
-                      Delete
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </article>
-
-          <article className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2 className={styles.panelTitle}>Preview player</h2>
-                <p className={styles.panelSubtitle}>
-                  Select any saved clip to listen before exporting or deleting it.
-                </p>
+                    {selectedInputDeviceName}
+                  </strong>
+                </article>
+                <article className={styles.metaCard}>
+                  <span className={styles.metaLabel}>Clip length</span>
+                  <strong className={styles.metaValue}>10 seconds</strong>
+                </article>
+                <article className={styles.metaCard}>
+                  <span className={styles.metaLabel}>Saved clips</span>
+                  <strong className={styles.metaValue}>{recordings.length}</strong>
+                </article>
               </div>
-            </div>
 
-            {!selectedRecording ? (
-              <div className={styles.emptyState}>
-                <p>No clip selected.</p>
-                <p>Choose a saved item from the list to load the preview player.</p>
-              </div>
-            ) : (
-              <div className={styles.previewStack}>
-                <div className={styles.previewSummary}>
-                  <h3 className={styles.previewName}>{selectedRecording.name}</h3>
-                  <p className={styles.previewTimestamp}>
-                    Created {formatDateTime(selectedRecording.createdAt)}
-                  </p>
-                </div>
-
-                <div className={styles.previewInfoGrid}>
-                  <div className={styles.infoBlock}>
-                    <span className={styles.infoLabel}>Duration</span>
-                    <strong className={styles.infoValue}>
-                      {formatDuration(selectedRecording.durationMs)}
-                    </strong>
-                  </div>
-                  <div className={styles.infoBlock}>
-                    <span className={styles.infoLabel}>File size</span>
-                    <strong className={styles.infoValue}>
-                      {formatBytes(selectedRecording.size)}
-                    </strong>
-                  </div>
-                  <div className={styles.infoBlock}>
-                    <span className={styles.infoLabel}>Encoding</span>
-                    <strong className={styles.infoValue}>
-                      {formatMimeType(selectedRecording.mimeType)}
-                    </strong>
-                  </div>
-                  <div className={styles.infoBlock}>
-                    <span className={styles.infoLabel}>Preview source</span>
-                    <strong className={styles.infoValue}>
-                      {selectedRecordingType
-                        ? formatMimeType(selectedRecordingType)
-                        : "Loading"}
-                    </strong>
-                  </div>
-                </div>
-
-                <div className={styles.audioShell}>
-                  {isLoadingPreview ? (
-                    <p className={styles.helperText}>Loading audio preview...</p>
-                  ) : selectedRecordingUrl ? (
-                    <audio
-                      className={styles.audioPlayer}
-                      controls
-                      preload="metadata"
-                      src={selectedRecordingUrl}
-                    >
-                      Your browser does not support audio playback.
-                    </audio>
-                  ) : (
-                    <p className={styles.helperText}>
-                      Preview could not be loaded for this saved clip.
-                    </p>
-                  )}
-                </div>
-
-                <div className={styles.previewActions}>
-                  {selectedRecordingUrl ? (
-                    <a
-                      className={styles.secondaryLink}
-                      href={selectedRecordingUrl}
-                      download={selectedRecording.name}
-                    >
-                      Download clip
-                    </a>
-                  ) : null}
+              <div className={styles.statusRow}>
+                <div className={styles.controls}>
+                  <button
+                    className={styles.primaryButton}
+                    type="button"
+                    onClick={startRecording}
+                    disabled={isRecording}
+                  >
+                    Start recording
+                  </button>
 
                   <button
-                    className={styles.deleteButtonAlt}
+                    className={styles.secondaryButton}
                     type="button"
-                    onClick={() => void handleDelete(selectedRecording.id)}
+                    onClick={stopRecording}
+                    disabled={!isRecording}
                   >
-                    Delete this clip
+                    Stop recording
+                  </button>
+
+                  <button
+                    className={styles.ghostButton}
+                    type="button"
+                    onClick={() => void handleClearAll()}
+                    disabled={recordings.length === 0}
+                  >
+                    Clear saved clips
                   </button>
                 </div>
 
-                <p className={styles.helperText}>
-                  Continuous capture uses the browser&apos;s default audio input.
-                  Every saved clip stays in local browser storage until you remove
-                  it.
-                </p>
+                {isRecording ? (
+                  <div className={styles.liveStatus}>
+                    <span className={styles.livePill}>
+                      <span className={styles.liveDot} />
+                      {`Next save in ${formatClock(timeUntilNextSaveMs)}`}
+                    </span>
+
+                    <span className={styles.sessionText}>
+                      {sessionStartedAt
+                        ? `This session saved ${segmentsThisSession} clip${
+                            segmentsThisSession === 1 ? "" : "s"
+                          }`
+                        : ""}
+                    </span>
+                  </div>
+                ) : !isInputMonitoring ? (
+                  <div className={styles.liveStatus}>
+                    <span className={styles.livePill}>
+                      <span className={styles.liveDot} />
+                      Waiting for microphone access
+                    </span>
+
+                    <span className={styles.sessionText}>
+                      Files are saved automatically to D:\audio
+                    </span>
+                  </div>
+                ) : null}
               </div>
-            )}
-          </article>
+
+              {errorMessage ? (
+                <p className={styles.error}>{errorMessage}</p>
+              ) : null}
+            </header>
+
+            <article className={`${styles.panel} ${styles.filesPanel}`}>
+              {recordings.length === 0 ? (
+                null
+              ) : (
+                <ul className={styles.recordingList}>
+                  {recordings.map((item) => (
+                    <li
+                      key={item.id}
+                      className={`${styles.recordingItem} ${
+                        selectedRecordingId === item.id
+                          ? styles.recordingItemActive
+                          : ""
+                      }`}
+                    >
+                      <button
+                        className={styles.recordingButton}
+                        type="button"
+                        onClick={() => setSelectedRecordingId(item.id)}
+                      >
+                        <span className={styles.recordingName}>{item.name}</span>
+                        <span className={styles.recordingMeta}>
+                          {formatDateTime(item.createdAt)}
+                        </span>
+                        <span className={styles.recordingMeta}>
+                          {formatDuration(item.durationMs)} |{" "}
+                          {formatBytes(item.size)} |{" "}
+                          {formatMimeType(item.mimeType)}
+                        </span>
+                      </button>
+
+                      <button
+                        className={styles.deleteButton}
+                        type="button"
+                        onClick={() => void handleDelete(item.id)}
+                      >
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          </section>
+
+          <section className={styles.playerColumn}>
+            <article className={`${styles.panel} ${styles.playerPanel}`}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <h2 className={styles.panelTitle}>Preview player</h2>
+                  <p className={styles.panelSubtitle}>
+                    Select any saved clip to listen before exporting or deleting
+                    it.
+                  </p>
+                </div>
+              </div>
+
+              {!selectedRecording ? (
+                <div className={styles.emptyState}>
+                  <p>No clip selected.</p>
+                  <p>
+                    Choose a saved item from the list to load the preview player.
+                  </p>
+                </div>
+              ) : (
+                <div className={styles.previewStack}>
+                  <div className={styles.previewSummary}>
+                    <h3 className={styles.previewName}>
+                      {selectedRecording.name}
+                    </h3>
+                    <p className={styles.previewTimestamp}>
+                      Created {formatDateTime(selectedRecording.createdAt)}
+                    </p>
+                  </div>
+
+                  <div className={styles.previewInfoGrid}>
+                    <div className={styles.infoBlock}>
+                      <span className={styles.infoLabel}>Duration</span>
+                      <strong className={styles.infoValue}>
+                        {formatDuration(selectedRecording.durationMs)}
+                      </strong>
+                    </div>
+                    <div className={styles.infoBlock}>
+                      <span className={styles.infoLabel}>File size</span>
+                      <strong className={styles.infoValue}>
+                        {formatBytes(selectedRecording.size)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className={styles.audioShell}>
+                    {isLoadingPreview ? (
+                      <p className={styles.helperText}>
+                        Loading audio preview...
+                      </p>
+                    ) : selectedRecordingUrl ? (
+                      <audio
+                        key={selectedRecording.id}
+                        ref={previewAudioRef}
+                        className={styles.audioPlayer}
+                        controls
+                        onPlay={handlePreviewPlay}
+                        onPause={handlePreviewPause}
+                        onEnded={handlePreviewPause}
+                        preload="metadata"
+                        src={selectedRecordingUrl}
+                      >
+                        Your browser does not support audio playback.
+                      </audio>
+                    ) : (
+                      <p className={styles.helperText}>
+                        Preview could not be loaded for this saved clip.
+                      </p>
+                    )}
+                  </div>
+
+                  <section
+                    className={`${styles.monitorPanel} ${styles.previewMonitor}`}
+                  >
+                    <div className={styles.monitorHeader}>
+                      <div>
+                        <h3 className={styles.monitorTitle}>Playback Monitor</h3>
+                        <p className={styles.monitorSubtitle}>
+                          See the selected clip&apos;s output level and waveform
+                          while the preview player is running.
+                        </p>
+                      </div>
+                      <span className={styles.monitorBadge}>
+                        {isPreviewPlaying ? "Playing" : "Ready"}
+                      </span>
+                    </div>
+
+                    <div className={styles.monitorGrid}>
+                      <div className={styles.levelCard}>
+                        <div className={styles.levelHeader}>
+                          <span className={styles.levelLabel}>
+                            Playback level
+                          </span>
+                          <strong className={styles.levelValue}>
+                            {playbackLevel}%
+                          </strong>
+                        </div>
+
+                        <div className={styles.levelTrack}>
+                          <div
+                            className={styles.levelFillPlayback}
+                            style={{ width: `${playbackLevel}%` }}
+                          />
+                        </div>
+
+                        <div className={styles.levelMeta}>
+                          <span>Average {playbackLevel}%</span>
+                          <span>Peak {playbackPeakLevel}%</span>
+                        </div>
+                      </div>
+
+                      <div className={styles.waveformCard}>
+                        <div className={styles.levelHeader}>
+                          <span className={styles.levelLabel}>
+                            Playback waveform
+                          </span>
+                          <strong className={styles.levelValue}>
+                            {isPreviewPlaying ? "Active" : "Standby"}
+                          </strong>
+                        </div>
+
+                        <canvas
+                          ref={previewWaveformCanvasRef}
+                          className={styles.waveformCanvas}
+                        />
+
+                        <p className={styles.monitorHint}>
+                          Press play on the preview player to animate the
+                          playback waveform and level meter.
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <div className={styles.previewActions}>
+                    {selectedRecordingUrl ? (
+                      <a
+                        className={styles.secondaryLink}
+                        href={selectedRecordingUrl}
+                        download={selectedRecording.name}
+                      >
+                        Download clip
+                      </a>
+                    ) : null}
+
+                    <button
+                      className={styles.deleteButtonAlt}
+                      type="button"
+                      onClick={() => void handleDelete(selectedRecording.id)}
+                    >
+                      Delete this clip
+                    </button>
+                  </div>
+                </div>
+              )}
+            </article>
+          </section>
         </section>
       </section>
     </main>
@@ -946,28 +1506,30 @@ function createRecorder(stream) {
   };
 }
 
-function buildFileName(createdAt, segmentNumber, mimeType) {
-  const timestamp = createdAt.replace(/[:.]/g, "-");
-  const segmentLabel = String(segmentNumber).padStart(3, "0");
-  return `audio-log-${timestamp}-segment-${segmentLabel}.${getFileExtension(
-    mimeType
-  )}`;
+function buildFileName(createdAt) {
+  const timestamp = formatFileTimestamp(createdAt);
+  return `${timestamp}.mp3`;
 }
 
-function getFileExtension(mimeType) {
-  if (mimeType.includes("mp4")) {
-    return "mp4";
+function formatFileTimestamp(value) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value)
+      .replace(/[T\s]+/g, "_")
+      .replace(/[:.]/g, "-")
+      .replace(/Z$/, "");
   }
 
-  if (mimeType.includes("ogg")) {
-    return "ogg";
-  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
 
-  if (mimeType.includes("webm")) {
-    return "webm";
-  }
-
-  return "bin";
+  return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}-${milliseconds}`;
 }
 
 function formatDateTime(value) {
