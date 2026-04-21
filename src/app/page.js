@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "./page.module.css";
 import {
   clearAllRecordings,
@@ -33,13 +33,18 @@ export default function Home() {
   const [listenSource, setListenSource] = useState("playback");
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecordingUrl, setSelectedRecordingUrl] = useState("");
+  const [selectedRecordingBlob, setSelectedRecordingBlob] = useState(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [completeWaveformStatus, setCompleteWaveformStatus] =
+    useState("Standby");
   const [isRecording, setIsRecording] = useState(false);
   const [isInputMonitoring, setIsInputMonitoring] = useState(false);
   const [inputLevel, setInputLevel] = useState(0);
   const [peakLevel, setPeakLevel] = useState(0);
   const [playbackLevel, setPlaybackLevel] = useState(0);
   const [playbackPeakLevel, setPlaybackPeakLevel] = useState(0);
+  const [playbackPositionMs, setPlaybackPositionMs] = useState(0);
+  const [playbackDurationMs, setPlaybackDurationMs] = useState(0);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [selectedInputDeviceName, setSelectedInputDeviceName] =
     useState("Default microphone");
@@ -63,6 +68,10 @@ export default function Home() {
   const previewSourceElementRef = useRef(null);
   const previewWaveformCanvasRef = useRef(null);
   const previewWaveformDataRef = useRef(null);
+  const completeWaveformCanvasRef = useRef(null);
+  const completeWaveformPeaksRef = useRef(null);
+  const waveformScrubberProgressRef = useRef(0);
+  const isWaveformScrubbingRef = useRef(false);
   const previewAnimationFrameRef = useRef(null);
   const previewMeterUpdatedAtRef = useRef(0);
   const recorderRef = useRef(null);
@@ -81,6 +90,145 @@ export default function Home() {
     item.name.toLowerCase().includes(clipSearch.trim().toLowerCase())
   );
   const segmentDurationMs = segmentDurationSeconds * 1000;
+  const selectedClipDurationMs =
+    playbackDurationMs || selectedRecording?.durationMs || 0;
+  const selectedClipPositionMs = Math.min(
+    playbackPositionMs,
+    selectedClipDurationMs
+  );
+
+  const drawIdleCompleteWaveform = useCallback(() => {
+    const canvas = completeWaveformCanvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const preparedCanvas = prepareCanvas(canvas);
+
+    if (!preparedCanvas) {
+      return;
+    }
+
+    const { context, width, height } = preparedCanvas;
+
+    drawWaveformBackground(context, width, height);
+
+    context.lineWidth = Math.max(2, width * 0.002);
+    context.strokeStyle = "rgba(186, 238, 255, 0.42)";
+    context.beginPath();
+    context.moveTo(0, height / 2);
+    context.lineTo(width, height / 2);
+    context.stroke();
+  }, []);
+
+  const drawUnavailableCompleteWaveform = useCallback(() => {
+    const canvas = completeWaveformCanvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const preparedCanvas = prepareCanvas(canvas);
+
+    if (!preparedCanvas) {
+      return;
+    }
+
+    const { context, width, height } = preparedCanvas;
+
+    drawWaveformBackground(context, width, height);
+
+    context.save();
+    context.setLineDash([10, 10]);
+    context.lineWidth = Math.max(2, width * 0.002);
+    context.strokeStyle = "rgba(255, 166, 166, 0.54)";
+    context.beginPath();
+    context.moveTo(0, height / 2);
+    context.lineTo(width, height / 2);
+    context.stroke();
+    context.restore();
+  }, []);
+
+  const drawCompleteWaveformPeaks = useCallback(() => {
+    const canvas = completeWaveformCanvasRef.current;
+    const waveform = completeWaveformPeaksRef.current;
+    const peaks = waveform?.peaks;
+
+    if (!canvas || !peaks?.length) {
+      drawIdleCompleteWaveform();
+      return;
+    }
+
+    const preparedCanvas = prepareCanvas(canvas);
+
+    if (!preparedCanvas) {
+      return;
+    }
+
+    const { context, width, height } = preparedCanvas;
+    const centerY = height / 2;
+    const amplitudeHeight = height * 0.39;
+    const columnWidth = width / peaks.length;
+    const waveformGradient = context.createLinearGradient(0, 0, width, 0);
+
+    waveformGradient.addColorStop(0, "rgba(140, 244, 214, 0.96)");
+    waveformGradient.addColorStop(0.58, "rgba(255, 210, 129, 0.98)");
+    waveformGradient.addColorStop(1, "rgba(255, 164, 118, 0.96)");
+
+    drawWaveformBackground(context, width, height);
+
+    context.save();
+    context.lineCap = "round";
+    context.lineWidth = Math.max(1, columnWidth * 0.74);
+    context.strokeStyle = waveformGradient;
+    context.shadowBlur = 10;
+    context.shadowColor = "rgba(255, 210, 129, 0.24)";
+    context.beginPath();
+
+    for (let index = 0; index < peaks.length; index += 1) {
+      const peak = peaks[index];
+      const minValue = Math.min(-0.012, peak.min);
+      const maxValue = Math.max(0.012, peak.max);
+      const x = ((index + 0.5) / peaks.length) * width;
+      const topY = centerY - maxValue * amplitudeHeight;
+      const bottomY = centerY - minValue * amplitudeHeight;
+
+      context.moveTo(x, topY);
+      context.lineTo(x, bottomY);
+    }
+
+    context.stroke();
+    context.restore();
+
+    const scrubberProgress = Math.min(
+      1,
+      Math.max(0, waveformScrubberProgressRef.current)
+    );
+    const scrubberX = scrubberProgress * width;
+
+    context.save();
+    context.strokeStyle = "rgba(255, 247, 234, 0.98)";
+    context.lineWidth = Math.max(2, width * 0.0022);
+    context.shadowBlur = 16;
+    context.shadowColor = "rgba(255, 210, 129, 0.55)";
+    context.beginPath();
+    context.moveTo(scrubberX, 0);
+    context.lineTo(scrubberX, height);
+    context.stroke();
+    context.shadowBlur = 0;
+    context.fillStyle = "#fff7ea";
+    context.beginPath();
+    context.arc(
+      scrubberX,
+      height / 2,
+      Math.max(4, Math.min(7, height * 0.13)),
+      0,
+      Math.PI * 2
+    );
+    context.fill();
+    context.restore();
+  }, [drawIdleCompleteWaveform]);
 
   useEffect(() => {
     listenSourceRef.current = listenSource;
@@ -332,6 +480,7 @@ export default function Home() {
   useEffect(() => {
     drawIdleWaveform();
     drawIdlePreviewWaveform();
+    drawIdleCompleteWaveform();
 
     function handleResize() {
       if (!analyserRef.current) {
@@ -341,6 +490,12 @@ export default function Home() {
       if (!previewAnalyserRef.current) {
         drawIdlePreviewWaveform();
       }
+
+      if (completeWaveformPeaksRef.current) {
+        drawCompleteWaveformPeaks();
+      } else {
+        drawIdleCompleteWaveform();
+      }
     }
 
     window.addEventListener("resize", handleResize);
@@ -348,7 +503,7 @@ export default function Home() {
     return () => {
       window.removeEventListener("resize", handleResize);
     };
-  }, []);
+  }, [drawCompleteWaveformPeaks, drawIdleCompleteWaveform]);
 
   useEffect(() => {
     if (!navigator.mediaDevices?.addEventListener) {
@@ -401,8 +556,14 @@ export default function Home() {
       previewMeterUpdatedAtRef.current = 0;
       setPlaybackLevel(0);
       setPlaybackPeakLevel(0);
+      setPlaybackPositionMs(0);
+      setPlaybackDurationMs(0);
       setIsPreviewPlaying(false);
       drawIdlePreviewWaveform();
+      completeWaveformPeaksRef.current = null;
+      setSelectedRecordingBlob(null);
+      setCompleteWaveformStatus(selectedRecordingId ? "Loading" : "Standby");
+      drawIdleCompleteWaveform();
 
       if (!selectedRecordingId) {
         setSelectedRecordingUrl((currentUrl) => {
@@ -432,11 +593,13 @@ export default function Home() {
 
             return "";
           });
+          setCompleteWaveformStatus("Unavailable");
           return;
         }
 
         const previewUrl = URL.createObjectURL(entry.blob);
 
+        setSelectedRecordingBlob(entry.blob);
         setSelectedRecordingUrl((currentUrl) => {
           if (currentUrl) {
             URL.revokeObjectURL(currentUrl);
@@ -456,7 +619,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [selectedRecordingId]);
+  }, [drawIdleCompleteWaveform, selectedRecordingId]);
 
   useEffect(() => {
     return () => {
@@ -465,6 +628,92 @@ export default function Home() {
       }
     };
   }, [selectedRecordingUrl]);
+
+  useEffect(() => {
+    if (completeWaveformPeaksRef.current) {
+      drawCompleteWaveformPeaks();
+    }
+  }, [clipSearch, drawCompleteWaveformPeaks, selectedRecordingId]);
+
+  useEffect(() => {
+    waveformScrubberProgressRef.current =
+      selectedClipDurationMs > 0
+        ? Math.min(1, Math.max(0, selectedClipPositionMs / selectedClipDurationMs))
+        : 0;
+
+    if (completeWaveformPeaksRef.current) {
+      drawCompleteWaveformPeaks();
+    }
+  }, [
+    drawCompleteWaveformPeaks,
+    selectedClipDurationMs,
+    selectedClipPositionMs,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    completeWaveformPeaksRef.current = null;
+
+    if (!selectedRecordingBlob) {
+      drawIdleCompleteWaveform();
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    async function renderCompleteWaveform() {
+      setCompleteWaveformStatus("Rendering");
+      drawIdleCompleteWaveform();
+
+      try {
+        const audioBuffer = await decodeAudioBlob(selectedRecordingBlob);
+
+        if (cancelled) {
+          return;
+        }
+
+        const preparedCanvas = completeWaveformCanvasRef.current
+          ? prepareCanvas(completeWaveformCanvasRef.current)
+          : null;
+        const targetWidth = preparedCanvas?.width || 1200;
+        const peaks = buildWaveformPeaks(
+          audioBuffer,
+          getCompleteWaveformBucketCount(targetWidth)
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        completeWaveformPeaksRef.current = {
+          duration: audioBuffer.duration,
+          peaks,
+        };
+
+        drawCompleteWaveformPeaks();
+        setCompleteWaveformStatus("Complete");
+      } catch {
+        if (!cancelled) {
+          completeWaveformPeaksRef.current = null;
+          drawUnavailableCompleteWaveform();
+          setCompleteWaveformStatus("Unavailable");
+        }
+      }
+    }
+
+    void renderCompleteWaveform();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    drawCompleteWaveformPeaks,
+    drawIdleCompleteWaveform,
+    drawUnavailableCompleteWaveform,
+    selectedRecordingBlob,
+  ]);
 
   async function syncRecordings(preferredId) {
     const items = await getAllRecordings();
@@ -1153,8 +1402,152 @@ export default function Home() {
     }
   }
 
+  function handlePreviewMetadata() {
+    const audioElement = previewAudioRef.current;
+    const durationMs =
+      audioElement && Number.isFinite(audioElement.duration)
+        ? audioElement.duration * 1000
+        : selectedRecording?.durationMs || 0;
+
+    setPlaybackDurationMs(durationMs);
+    setPlaybackPositionMs((currentPositionMs) =>
+      Math.min(currentPositionMs, durationMs)
+    );
+  }
+
+  function handlePreviewTimeUpdate() {
+    const audioElement = previewAudioRef.current;
+
+    if (!audioElement) {
+      return;
+    }
+
+    if (Number.isFinite(audioElement.currentTime)) {
+      setPlaybackPositionMs(audioElement.currentTime * 1000);
+    }
+  }
+
   function handlePreviewPause() {
     stopPreviewVisualizer();
+  }
+
+  function handlePreviewEnded() {
+    handlePreviewPause();
+    setPlaybackPositionMs(selectedClipDurationMs);
+  }
+
+  async function handleSelectedClipPlayPause() {
+    const audioElement = previewAudioRef.current;
+
+    if (!audioElement || !selectedRecordingUrl || isLoadingPreview) {
+      return;
+    }
+
+    if (!audioElement.paused && !audioElement.ended) {
+      audioElement.pause();
+      return;
+    }
+
+    if (audioElement.ended) {
+      audioElement.currentTime = 0;
+      setPlaybackPositionMs(0);
+    }
+
+    try {
+      await audioElement.play();
+    } catch (error) {
+      setErrorMessage(error?.message || "Playback could not be started.");
+    }
+  }
+
+  function handleSelectedClipSeek(value) {
+    const nextPositionMs = Number(value);
+
+    if (!Number.isFinite(nextPositionMs)) {
+      return;
+    }
+
+    const clampedPositionMs = Math.min(
+      Math.max(0, nextPositionMs),
+      selectedClipDurationMs
+    );
+    const audioElement = previewAudioRef.current;
+
+    setPlaybackPositionMs(clampedPositionMs);
+
+    if (audioElement && selectedClipDurationMs > 0) {
+      audioElement.currentTime = clampedPositionMs / 1000;
+    }
+  }
+
+  function seekSelectedClipFromWaveform(event) {
+    if (!selectedRecordingUrl || isLoadingPreview || selectedClipDurationMs <= 0) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+
+    if (rect.width <= 0) {
+      return;
+    }
+
+    const progress = Math.min(
+      1,
+      Math.max(0, (event.clientX - rect.left) / rect.width)
+    );
+
+    handleSelectedClipSeek(progress * selectedClipDurationMs);
+  }
+
+  function handleWaveformPointerDown(event) {
+    if (!selectedRecordingUrl || isLoadingPreview || selectedClipDurationMs <= 0) {
+      return;
+    }
+
+    event.preventDefault();
+    isWaveformScrubbingRef.current = true;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    seekSelectedClipFromWaveform(event);
+  }
+
+  function handleWaveformPointerMove(event) {
+    if (!isWaveformScrubbingRef.current) {
+      return;
+    }
+
+    seekSelectedClipFromWaveform(event);
+  }
+
+  function finishWaveformScrub(event) {
+    if (!isWaveformScrubbingRef.current) {
+      return;
+    }
+
+    seekSelectedClipFromWaveform(event);
+    isWaveformScrubbingRef.current = false;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  function handleWaveformKeyDown(event) {
+    if (!selectedRecordingUrl || isLoadingPreview || selectedClipDurationMs <= 0) {
+      return;
+    }
+
+    const stepMs = event.shiftKey ? 10_000 : 1000;
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      handleSelectedClipSeek(selectedClipPositionMs - stepMs);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      handleSelectedClipSeek(selectedClipPositionMs + stepMs);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      handleSelectedClipSeek(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      handleSelectedClipSeek(selectedClipDurationMs);
+    }
   }
 
   async function handleDelete(recordingId) {
@@ -1164,6 +1557,10 @@ export default function Home() {
 
   async function handleClearAll() {
     await clearAllRecordings();
+    completeWaveformPeaksRef.current = null;
+    setSelectedRecordingBlob(null);
+    setCompleteWaveformStatus("Standby");
+    drawIdleCompleteWaveform();
     setSelectedRecordingUrl((currentUrl) => {
       if (currentUrl) {
         URL.revokeObjectURL(currentUrl);
@@ -1391,48 +1788,112 @@ export default function Home() {
 
               {filteredRecordings.length > 0 ? (
                 <ul className={styles.recordingList}>
-                  {filteredRecordings.map((item) => (
-                    <li
-                      key={item.id}
-                      className={`${styles.recordingItem} ${
-                        selectedRecordingId === item.id
-                          ? styles.recordingItemActive
-                          : ""
-                      }`}
-                    >
-                      <button
-                        className={styles.recordingButton}
-                        type="button"
+                  {filteredRecordings.map((item) => {
+                    const isSelected = selectedRecordingId === item.id;
+
+                    return (
+                      <li
+                        key={item.id}
+                        className={`${styles.recordingItem} ${
+                          isSelected ? styles.recordingItemActive : ""
+                        }`}
                         onClick={() => setSelectedRecordingId(item.id)}
                       >
-                        <span className={styles.recordingName}>{item.name}</span>
-                        <span className={styles.recordingMeta}>
-                          {formatDuration(item.durationMs)}
-                        </span>
-                        <span className={styles.recordingMeta}>
-                          {formatBytes(item.size)}
-                        </span>
-                      </button>
-
-                      <div className={styles.recordingActions}>
-                        <a
-                          className={styles.secondaryLink}
-                          href={`/api/recordings/${encodeURIComponent(item.id)}`}
-                          download={item.name}
+                        <div
+                          className={`${styles.recordingDetails} ${
+                            isSelected ? styles.recordingDetailsActive : ""
+                          }`}
                         >
-                          Download
-                        </a>
+                          <div className={styles.recordingSummaryStack}>
+                            <button
+                              className={styles.recordingNameButton}
+                              type="button"
+                            >
+                              <span className={styles.recordingName}>
+                                {item.name}
+                              </span>
+                            </button>
 
-                        <button
-                          className={styles.deleteButton}
-                          type="button"
-                          onClick={() => void handleDelete(item.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </li>
-                  ))}
+                            {isSelected ? (
+                              <div className={styles.selectedClipTransport}>
+                                <button
+                                  className={styles.playPauseButton}
+                                  type="button"
+                                  onClick={() => void handleSelectedClipPlayPause()}
+                                  disabled={
+                                    !selectedRecordingUrl || isLoadingPreview
+                                  }
+                                  aria-pressed={isPreviewPlaying}
+                                >
+                                  {isPreviewPlaying ? "Pause" : "Play"}
+                                </button>
+
+                                <span className={styles.inlineTime}>
+                                  {formatDuration(selectedClipPositionMs)} /{" "}
+                                  {formatDuration(selectedClipDurationMs)}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {isSelected ? (
+                            <div className={styles.inlineWaveformShell}>
+                              <canvas
+                                ref={completeWaveformCanvasRef}
+                                className={`${styles.waveformCanvas} ${styles.inlineWaveformCanvas}`}
+                                aria-label={`Complete waveform for ${item.name}`}
+                                aria-valuemax={Math.round(selectedClipDurationMs)}
+                                aria-valuemin={0}
+                                aria-valuenow={Math.round(selectedClipPositionMs)}
+                                onKeyDown={handleWaveformKeyDown}
+                                onPointerCancel={finishWaveformScrub}
+                                onPointerDown={handleWaveformPointerDown}
+                                onPointerMove={handleWaveformPointerMove}
+                                onPointerUp={finishWaveformScrub}
+                                role="slider"
+                                tabIndex={0}
+                              />
+
+                              {completeWaveformStatus !== "Complete" ? (
+                                <span className={styles.inlineWaveformStatus}>
+                                  {completeWaveformStatus}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          <span className={styles.recordingMeta}>
+                            {formatDuration(item.durationMs)}
+                          </span>
+                          <span className={styles.recordingMeta}>
+                            {formatBytes(item.size)}
+                          </span>
+                        </div>
+
+                        <div className={styles.recordingActions}>
+                          <a
+                            className={styles.secondaryLink}
+                            href={`/api/recordings/${encodeURIComponent(item.id)}`}
+                            download={item.name}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            Download
+                          </a>
+
+                          <button
+                            className={styles.deleteButton}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDelete(item.id);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : recordings.length > 0 ? (
                 <div className={styles.emptyState}>
@@ -1451,33 +1912,33 @@ export default function Home() {
                 </div>
               ) : (
                 <div className={styles.previewStack}>
-                  <div className={styles.previewPlaybackRow}>
-                    <div className={`${styles.audioShell} ${styles.playbackSeekCard}`}>
-                      {isLoadingPreview ? (
-                        <p className={styles.helperText}>
-                          Loading audio preview...
-                        </p>
-                      ) : selectedRecordingUrl ? (
-                        <audio
-                          key={selectedRecording.id}
-                          ref={previewAudioRef}
-                          className={styles.audioPlayer}
-                          controls
-                          onPlay={handlePreviewPlay}
-                          onPause={handlePreviewPause}
-                          onEnded={handlePreviewPause}
-                          preload="metadata"
-                          src={selectedRecordingUrl}
-                        >
-                          Your browser does not support audio playback.
-                        </audio>
-                      ) : (
-                        <p className={styles.helperText}>
-                          Preview could not be loaded for this saved clip.
-                        </p>
-                      )}
-                    </div>
+                  {selectedRecordingUrl ? (
+                    <audio
+                      key={selectedRecording.id}
+                      ref={previewAudioRef}
+                      className={styles.hiddenAudioPlayer}
+                      onPlay={handlePreviewPlay}
+                      onPause={handlePreviewPause}
+                      onEnded={handlePreviewEnded}
+                      onLoadedMetadata={handlePreviewMetadata}
+                      onSeeked={handlePreviewTimeUpdate}
+                      onTimeUpdate={handlePreviewTimeUpdate}
+                      preload="metadata"
+                      src={selectedRecordingUrl}
+                    >
+                      Your browser does not support audio playback.
+                    </audio>
+                  ) : null}
 
+                  {isLoadingPreview ? (
+                    <p className={styles.helperText}>Loading audio preview...</p>
+                  ) : selectedRecordingUrl ? null : (
+                    <p className={styles.helperText}>
+                      Preview could not be loaded for this saved clip.
+                    </p>
+                  )}
+
+                  <div className={styles.previewPlaybackRow}>
                     <div className={`${styles.levelCard} ${styles.previewStatCard}`}>
                       <div className={styles.levelHeader}>
                         <span className={styles.levelLabel}>
@@ -1517,6 +1978,7 @@ export default function Home() {
                       />
                     </div>
                   </div>
+
                 </div>
               )}
             </article>
@@ -1661,6 +2123,74 @@ function getStoredSegmentDurationSeconds() {
   } catch {
     return DEFAULT_SEGMENT_DURATION_SECONDS;
   }
+}
+
+async function decodeAudioBlob(blob) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    throw new Error("Audio decoding is not available in this browser.");
+  }
+
+  const context = new AudioContextClass();
+
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    return await context.decodeAudioData(arrayBuffer);
+  } finally {
+    if (context.state !== "closed") {
+      void context.close().catch(() => {});
+    }
+  }
+}
+
+function getCompleteWaveformBucketCount(width) {
+  return Math.min(4096, Math.max(512, Math.ceil(width * 1.25)));
+}
+
+function buildWaveformPeaks(audioBuffer, bucketCount) {
+  const sampleCount = audioBuffer.length;
+
+  if (!sampleCount) {
+    return [];
+  }
+
+  const safeBucketCount = Math.max(
+    1,
+    Math.min(Math.round(bucketCount), sampleCount)
+  );
+  const channels = Array.from(
+    { length: audioBuffer.numberOfChannels },
+    (_, index) => audioBuffer.getChannelData(index)
+  );
+  const peaks = [];
+
+  for (let bucketIndex = 0; bucketIndex < safeBucketCount; bucketIndex += 1) {
+    const start = Math.floor((bucketIndex / safeBucketCount) * sampleCount);
+    const end = Math.max(
+      start + 1,
+      Math.floor(((bucketIndex + 1) / safeBucketCount) * sampleCount)
+    );
+    const step = Math.max(1, Math.floor((end - start) / 420));
+    let min = 1;
+    let max = -1;
+
+    for (let sampleIndex = start; sampleIndex < end; sampleIndex += step) {
+      for (const channelData of channels) {
+        const value = channelData[sampleIndex] || 0;
+
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+    }
+
+    peaks.push({
+      min: Math.max(-1, min === 1 ? 0 : min),
+      max: Math.min(1, max === -1 ? 0 : max),
+    });
+  }
+
+  return peaks;
 }
 
 function formatDateTime(value) {
