@@ -15,10 +15,8 @@ const MIN_SEGMENT_DURATION_SECONDS = 1;
 const MAX_SEGMENT_DURATION_SECONDS = 3600;
 const SEGMENT_DURATION_STORAGE_KEY = "audio-offairlogger-segment-duration-seconds";
 const RECORDER_AUDIO_BITS_PER_SECOND = 320_000;
-const RMS_METER_FLOOR_DB = -60;
-const RMS_METER_CEILING_DB = -12;
-const PEAK_METER_FLOOR_DB = -60;
-const PEAK_METER_CEILING_DB = -3;
+const METER_FLOOR_DB = -40;
+const METER_CEILING_DB = 0;
 const RECORDER_MIME_TYPES = [
   "audio/mp4;codecs=mp4a.40.2",
   "audio/mp4",
@@ -43,10 +41,10 @@ export default function Home() {
     useState("Standby");
   const [isRecording, setIsRecording] = useState(false);
   const [isInputMonitoring, setIsInputMonitoring] = useState(false);
-  const [inputLevel, setInputLevel] = useState(0);
-  const [peakLevel, setPeakLevel] = useState(0);
-  const [playbackLevel, setPlaybackLevel] = useState(0);
-  const [playbackPeakLevel, setPlaybackPeakLevel] = useState(0);
+  const [inputLevel, setInputLevel] = useState(METER_FLOOR_DB);
+  const [peakLevel, setPeakLevel] = useState(METER_FLOOR_DB);
+  const [playbackLevel, setPlaybackLevel] = useState(METER_FLOOR_DB);
+  const [playbackPeakLevel, setPlaybackPeakLevel] = useState(METER_FLOOR_DB);
   const [playbackPositionMs, setPlaybackPositionMs] = useState(0);
   const [playbackDurationMs, setPlaybackDurationMs] = useState(0);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
@@ -325,8 +323,8 @@ export default function Home() {
             listenSourceRef.current === "input"
           );
 
-          setInputLevel(0);
-          setPeakLevel(0);
+          setInputLevel(METER_FLOOR_DB);
+          setPeakLevel(METER_FLOOR_DB);
 
           if (context.state === "suspended") {
             void context.resume().catch(() => {});
@@ -374,16 +372,8 @@ export default function Home() {
             }
 
             const rms = Math.sqrt(sum / data.length);
-            const averageLevel = sampleToMeterPercent(
-              rms,
-              RMS_METER_FLOOR_DB,
-              RMS_METER_CEILING_DB
-            );
-            const peakLevelValue = sampleToMeterPercent(
-              peak,
-              PEAK_METER_FLOOR_DB,
-              PEAK_METER_CEILING_DB
-            );
+            const averageLevel = sampleToMeterDb(rms);
+            const peakLevelValue = sampleToMeterDb(peak);
             const now = performance.now();
 
             canvasContext.lineWidth = Math.max(2, width * 0.0036);
@@ -424,8 +414,8 @@ export default function Home() {
           audioContextRef.current = null;
           waveformDataRef.current = null;
           meterUpdatedAtRef.current = 0;
-          setInputLevel(0);
-          setPeakLevel(0);
+          setInputLevel(METER_FLOOR_DB);
+          setPeakLevel(METER_FLOOR_DB);
           drawIdleWaveform();
         }
 
@@ -580,8 +570,8 @@ export default function Home() {
       previewSourceElementRef.current = null;
       previewWaveformDataRef.current = null;
       previewMeterUpdatedAtRef.current = 0;
-      setPlaybackLevel(0);
-      setPlaybackPeakLevel(0);
+      setPlaybackLevel(METER_FLOOR_DB);
+      setPlaybackPeakLevel(METER_FLOOR_DB);
       setPlaybackPositionMs(0);
       setPlaybackDurationMs(0);
       setIsPreviewPlaying(false);
@@ -923,16 +913,8 @@ export default function Home() {
     }
 
     const rms = Math.sqrt(sum / data.length);
-    const averageLevel = sampleToMeterPercent(
-      rms,
-      RMS_METER_FLOOR_DB,
-      RMS_METER_CEILING_DB
-    );
-    const peakLevelValue = sampleToMeterPercent(
-      peak,
-      PEAK_METER_FLOOR_DB,
-      PEAK_METER_CEILING_DB
-    );
+    const averageLevel = sampleToMeterDb(rms);
+    const peakLevelValue = sampleToMeterDb(peak);
     const now = performance.now();
 
     context.lineWidth = Math.max(2, width * 0.0036);
@@ -994,16 +976,8 @@ export default function Home() {
     }
 
     const rms = Math.sqrt(sum / data.length);
-    const averageLevel = sampleToMeterPercent(
-      rms,
-      RMS_METER_FLOOR_DB,
-      RMS_METER_CEILING_DB
-    );
-    const peakLevelValue = sampleToMeterPercent(
-      peak,
-      PEAK_METER_FLOOR_DB,
-      PEAK_METER_CEILING_DB
-    );
+    const averageLevel = sampleToMeterDb(rms);
+    const peakLevelValue = sampleToMeterDb(peak);
     const now = performance.now();
 
     context.lineWidth = Math.max(2, width * 0.0036);
@@ -1055,8 +1029,8 @@ export default function Home() {
       listenSourceRef.current === "input"
     );
 
-    setInputLevel(0);
-    setPeakLevel(0);
+    setInputLevel(METER_FLOOR_DB);
+    setPeakLevel(METER_FLOOR_DB);
 
     if (context.state === "suspended") {
       void context.resume().catch(() => {});
@@ -1087,8 +1061,8 @@ export default function Home() {
     meterUpdatedAtRef.current = 0;
 
     if (resetMeters) {
-      setInputLevel(0);
-      setPeakLevel(0);
+      setInputLevel(METER_FLOOR_DB);
+      setPeakLevel(METER_FLOOR_DB);
       drawIdleWaveform();
     }
   }
@@ -1174,8 +1148,8 @@ export default function Home() {
 
     clearPreviewVisualizerFrame();
     previewMeterUpdatedAtRef.current = 0;
-    setPlaybackLevel(0);
-    setPlaybackPeakLevel(0);
+    setPlaybackLevel(METER_FLOOR_DB);
+    setPlaybackPeakLevel(METER_FLOOR_DB);
     drawPreviewWaveformFrame();
   }
 
@@ -1205,8 +1179,8 @@ export default function Home() {
     previewMeterUpdatedAtRef.current = 0;
 
     if (resetMeters) {
-      setPlaybackLevel(0);
-      setPlaybackPeakLevel(0);
+      setPlaybackLevel(METER_FLOOR_DB);
+      setPlaybackPeakLevel(METER_FLOOR_DB);
       setIsPreviewPlaying(false);
       drawIdlePreviewWaveform();
     }
@@ -1223,8 +1197,8 @@ export default function Home() {
     }
 
     if (resetMeters) {
-      setPlaybackLevel(0);
-      setPlaybackPeakLevel(0);
+      setPlaybackLevel(METER_FLOOR_DB);
+      setPlaybackPeakLevel(METER_FLOOR_DB);
       drawIdlePreviewWaveform();
     }
 
@@ -1654,20 +1628,26 @@ export default function Home() {
               <div className={styles.monitorGrid}>
                 <div className={styles.levelCard}>
                   <div className={styles.levelHeader}>
-                    <span className={styles.levelLabel}>Input level</span>
-                    <strong className={styles.levelValue}>{inputLevel}%</strong>
+                    <div className={styles.levelTitleRow}>
+                      <span className={styles.levelLabel}>
+                        Input level in dBFS
+                      </span>
+                      <strong className={styles.levelValue}>
+                        {formatDbNumber(inputLevel)}
+                      </strong>
+                    </div>
                   </div>
 
                   <div className={styles.levelTrack}>
                     <div
                       className={styles.levelFill}
-                      style={{ width: `${inputLevel}%` }}
+                      style={{ width: `${dbToMeterPercent(inputLevel)}%` }}
                     />
                   </div>
 
-                  <div className={styles.levelMeta}>
-                    <span>Average {inputLevel}%</span>
-                    <span>Peak {peakLevel}%</span>
+                  <div className={styles.levelScale}>
+                    <span>{formatDbNumber(METER_FLOOR_DB)}</span>
+                    <span>{formatDbNumber(METER_CEILING_DB)}</span>
                   </div>
                 </div>
 
@@ -1983,24 +1963,28 @@ export default function Home() {
                   <div className={styles.previewPlaybackRow}>
                     <div className={`${styles.levelCard} ${styles.previewStatCard}`}>
                       <div className={styles.levelHeader}>
-                        <span className={styles.levelLabel}>
-                          Playback level
-                        </span>
-                        <strong className={styles.levelValue}>
-                          {playbackLevel}%
-                        </strong>
+                        <div className={styles.levelTitleRow}>
+                          <span className={styles.levelLabel}>
+                            Playback level in dBFS
+                          </span>
+                          <strong className={styles.levelValue}>
+                            {formatDbNumber(playbackLevel)}
+                          </strong>
+                        </div>
                       </div>
 
                       <div className={styles.levelTrack}>
                         <div
                           className={styles.levelFillPlayback}
-                          style={{ width: `${playbackLevel}%` }}
+                          style={{
+                            width: `${dbToMeterPercent(playbackLevel)}%`,
+                          }}
                         />
                       </div>
 
-                      <div className={styles.levelMeta}>
-                        <span>Average {playbackLevel}%</span>
-                        <span>Peak {playbackPeakLevel}%</span>
+                      <div className={styles.levelScale}>
+                        <span>{formatDbNumber(METER_FLOOR_DB)}</span>
+                        <span>{formatDbNumber(METER_CEILING_DB)}</span>
                       </div>
                     </div>
 
@@ -2167,15 +2151,27 @@ function getStoredSegmentDurationSeconds() {
   }
 }
 
-function sampleToMeterPercent(value, floorDb, ceilingDb) {
+function sampleToMeterDb(value) {
   if (!Number.isFinite(value) || value <= 0) {
-    return 0;
+    return METER_FLOOR_DB;
   }
 
   const db = 20 * Math.log10(Math.max(value, 0.000001));
-  const normalized = (db - floorDb) / (ceilingDb - floorDb);
+
+  return Math.round(Math.min(METER_CEILING_DB, Math.max(METER_FLOOR_DB, db)));
+}
+
+function dbToMeterPercent(value) {
+  const db = Number.isFinite(value) ? value : METER_FLOOR_DB;
+  const normalized = (db - METER_FLOOR_DB) / (METER_CEILING_DB - METER_FLOOR_DB);
 
   return Math.round(Math.min(1, Math.max(0, normalized)) * 100);
+}
+
+function formatDbNumber(value) {
+  const db = Number.isFinite(value) ? value : METER_FLOOR_DB;
+
+  return String(Math.round(db));
 }
 
 async function decodeAudioBlob(blob) {

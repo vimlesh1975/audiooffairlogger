@@ -421,9 +421,17 @@
   text-transform: uppercase;
 }
 
+.levelTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
 .levelValue {
   font-size: 1.08rem;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .levelTrack {
@@ -463,6 +471,17 @@
   color: rgba(223, 236, 242, 0.7);
   font-size: 0.94rem;
   line-height: 1.5;
+}
+
+.levelScale {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: rgba(223, 236, 242, 0.64);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .waveformCanvas {
