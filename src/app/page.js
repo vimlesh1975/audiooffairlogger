@@ -1265,10 +1265,11 @@ export default function Home() {
               ) : null}
             </header>
 
-            <article className={`${styles.panel} ${styles.filesPanel}`}>
-              {recordings.length === 0 ? (
-                null
-              ) : (
+          </section>
+
+          <section className={styles.playerColumn}>
+            {recordings.length > 0 ? (
+              <article className={`${styles.panel} ${styles.filesPanel} ${styles.recordingsDock}`}>
                 <ul className={styles.recordingList}>
                   {recordings.map((item) => (
                     <li
@@ -1305,11 +1306,9 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-              )}
-            </article>
-          </section>
+              </article>
+            ) : null}
 
-          <section className={styles.playerColumn}>
             <article className={`${styles.panel} ${styles.playerPanel}`}>
               <div className={styles.panelHeader}>
                 <div>

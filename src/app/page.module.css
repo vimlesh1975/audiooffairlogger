@@ -410,7 +410,7 @@
 }
 
 .playerColumn {
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .panel {
@@ -429,6 +429,10 @@
 .playerPanel {
   min-height: 0;
   overflow: hidden;
+}
+
+.recordingsDock {
+  max-height: 320px;
 }
 
 .panelHeader {
