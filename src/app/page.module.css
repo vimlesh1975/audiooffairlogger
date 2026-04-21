@@ -127,6 +127,40 @@
   gap: 12px;
 }
 
+.durationControl {
+  display: grid;
+  gap: 6px;
+  min-width: 132px;
+}
+
+.durationLabel {
+  color: rgba(241, 245, 247, 0.66);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.durationInput {
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(220, 239, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #eef7fa;
+  font-size: 1rem;
+  outline: none;
+}
+
+.durationInput:focus {
+  border-color: rgba(153, 230, 248, 0.34);
+  box-shadow: 0 0 0 3px rgba(153, 230, 248, 0.08);
+}
+
+.durationInput:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .primaryButton,
 .secondaryButton,
 .ghostButton,
@@ -749,7 +783,8 @@
   .primaryButton,
   .secondaryButton,
   .ghostButton,
-  .secondaryLink {
+  .secondaryLink,
+  .durationControl {
     width: 100%;
   }
 

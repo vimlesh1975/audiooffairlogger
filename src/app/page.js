@@ -10,7 +10,10 @@ import {
   saveRecording,
 } from "@/lib/recordings-db";
 
-const SEGMENT_DURATION_MS = 10_000;
+const DEFAULT_SEGMENT_DURATION_SECONDS = 10;
+const MIN_SEGMENT_DURATION_SECONDS = 1;
+const MAX_SEGMENT_DURATION_SECONDS = 3600;
+const SEGMENT_DURATION_STORAGE_KEY = "audio-offairlogger-segment-duration-seconds";
 const RECORDER_MIME_TYPES = [
   "audio/mp4;codecs=mp4a.40.2",
   "audio/mp4",
@@ -23,6 +26,9 @@ const RECORDER_MIME_TYPES = [
 export default function Home() {
   const [recordings, setRecordings] = useState([]);
   const [clipSearch, setClipSearch] = useState("");
+  const [segmentDurationSeconds, setSegmentDurationSeconds] = useState(
+    getStoredSegmentDurationSeconds
+  );
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecordingUrl, setSelectedRecordingUrl] = useState("");
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
@@ -37,7 +43,7 @@ export default function Home() {
     useState("Default microphone");
   const [segmentsThisSession, setSegmentsThisSession] = useState(0);
   const [timeUntilNextSaveMs, setTimeUntilNextSaveMs] =
-    useState(SEGMENT_DURATION_MS);
+    useState(() => getStoredSegmentDurationSeconds() * 1000);
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -71,6 +77,7 @@ export default function Home() {
   const filteredRecordings = recordings.filter((item) =>
     item.name.toLowerCase().includes(clipSearch.trim().toLowerCase())
   );
+  const segmentDurationMs = segmentDurationSeconds * 1000;
 
   useEffect(() => {
     let cancelled = false;
@@ -898,11 +905,11 @@ export default function Home() {
 
   function startSegmentTick() {
     clearSegmentTick();
-    setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
+    setTimeUntilNextSaveMs(segmentDurationMs);
 
     segmentTickRef.current = window.setInterval(() => {
       const elapsed = Date.now() - segmentStartedAtRef.current;
-      const remaining = Math.max(0, SEGMENT_DURATION_MS - elapsed);
+      const remaining = Math.max(0, segmentDurationMs - elapsed);
       setTimeUntilNextSaveMs(remaining);
     }, 1000);
   }
@@ -918,7 +925,7 @@ export default function Home() {
 
     segmentNumberRef.current = segmentNumber;
     setSegmentsThisSession(segmentNumber);
-    setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
+    setTimeUntilNextSaveMs(segmentDurationMs);
 
     const entry = {
       id: crypto.randomUUID(),
@@ -940,7 +947,7 @@ export default function Home() {
     } catch (error) {
       setErrorMessage(error?.message || "Failed to save the recorded clip.");
     } finally {
-      setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
+      setTimeUntilNextSaveMs(segmentDurationMs);
 
       if (shouldContinueRecordingRef.current && streamRef.current?.active) {
         setIsRecording(true);
@@ -966,7 +973,7 @@ export default function Home() {
     segmentStartedAtRef.current = 0;
     recorderRef.current = null;
     setIsRecording(false);
-    setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
+    setTimeUntilNextSaveMs(segmentDurationMs);
 
     if (keepMonitoringInputRef.current && streamRef.current?.active) {
       setIsInputMonitoring(true);
@@ -1029,7 +1036,7 @@ export default function Home() {
       if (activeRecorder && activeRecorder.state !== "inactive") {
         activeRecorder.stop();
       }
-    }, SEGMENT_DURATION_MS);
+    }, segmentDurationMs);
   }
 
   async function startRecording() {
@@ -1130,6 +1137,24 @@ export default function Home() {
     await syncRecordings();
   }
 
+  function handleSegmentDurationChange(value) {
+    const nextDurationSeconds = clampSegmentDurationSeconds(value);
+    setSegmentDurationSeconds(nextDurationSeconds);
+
+    try {
+      window.localStorage.setItem(
+        SEGMENT_DURATION_STORAGE_KEY,
+        String(nextDurationSeconds)
+      );
+    } catch {
+      // Ignore storage failures and continue with the in-memory setting.
+    }
+
+    if (!isRecording) {
+      setTimeUntilNextSaveMs(nextDurationSeconds * 1000);
+    }
+  }
+
   return (
     <main className={styles.page}>
       <section className={styles.shell}>
@@ -1197,6 +1222,22 @@ export default function Home() {
 
               <div className={styles.statusRow}>
                 <div className={styles.controls}>
+                  <label className={styles.durationControl}>
+                    <span className={styles.durationLabel}>Duration (sec)</span>
+                    <input
+                      className={styles.durationInput}
+                      type="number"
+                      min={MIN_SEGMENT_DURATION_SECONDS}
+                      max={MAX_SEGMENT_DURATION_SECONDS}
+                      step="1"
+                      value={segmentDurationSeconds}
+                      onChange={(event) =>
+                        handleSegmentDurationChange(event.target.value)
+                      }
+                      disabled={isRecording}
+                    />
+                  </label>
+
                   <button
                     className={styles.primaryButton}
                     type="button"
@@ -1476,6 +1517,39 @@ function formatFileTimestamp(value) {
   const seconds = String(date.getSeconds()).padStart(2, "0");
 
   return `${day}${month}${year}_${hours}${minutes}${seconds}`;
+}
+
+function clampSegmentDurationSeconds(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return DEFAULT_SEGMENT_DURATION_SECONDS;
+  }
+
+  return Math.min(
+    MAX_SEGMENT_DURATION_SECONDS,
+    Math.max(MIN_SEGMENT_DURATION_SECONDS, Math.round(numericValue))
+  );
+}
+
+function getStoredSegmentDurationSeconds() {
+  if (typeof window === "undefined") {
+    return DEFAULT_SEGMENT_DURATION_SECONDS;
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(
+      SEGMENT_DURATION_STORAGE_KEY
+    );
+
+    if (storedValue === null) {
+      return DEFAULT_SEGMENT_DURATION_SECONDS;
+    }
+
+    return clampSegmentDurationSeconds(storedValue);
+  } catch {
+    return DEFAULT_SEGMENT_DURATION_SECONDS;
+  }
 }
 
 function formatDateTime(value) {
