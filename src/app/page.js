@@ -27,6 +27,8 @@ export default function Home() {
   const [selectedRecordingType, setSelectedRecordingType] = useState("");
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [inputLevel, setInputLevel] = useState(0);
+  const [peakLevel, setPeakLevel] = useState(0);
   const [captureMimeType, setCaptureMimeType] = useState("");
   const [segmentsThisSession, setSegmentsThisSession] = useState(0);
   const [timeUntilNextSaveMs, setTimeUntilNextSaveMs] =
@@ -34,6 +36,13 @@ export default function Home() {
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const sourceNodeRef = useRef(null);
+  const waveformCanvasRef = useRef(null);
+  const waveformDataRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const meterUpdatedAtRef = useRef(0);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const segmentTickRef = useRef(null);
@@ -64,9 +73,44 @@ export default function Home() {
     return () => {
       cancelled = true;
       shouldContinueRecordingRef.current = false;
+      clearVisualizerFrame();
+
+      if (sourceNodeRef.current) {
+        sourceNodeRef.current.disconnect();
+        sourceNodeRef.current = null;
+      }
+
+      if (analyserRef.current) {
+        analyserRef.current.disconnect();
+        analyserRef.current = null;
+      }
+
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+        void audioContextRef.current.close().catch(() => {});
+      }
+
+      audioContextRef.current = null;
+      waveformDataRef.current = null;
+      meterUpdatedAtRef.current = 0;
       clearSegmentStopTimeout();
       clearSegmentTick();
       stopStream();
+    };
+  }, []);
+
+  useEffect(() => {
+    drawIdleWaveform();
+
+    function handleResize() {
+      if (!analyserRef.current) {
+        drawIdleWaveform();
+      }
+    }
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
     };
   }, []);
 
@@ -163,6 +207,13 @@ export default function Home() {
     }
   }
 
+  function clearVisualizerFrame() {
+    if (animationFrameRef.current) {
+      window.cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  }
+
   function clearSegmentStopTimeout() {
     if (segmentStopTimeoutRef.current) {
       window.clearTimeout(segmentStopTimeoutRef.current);
@@ -174,6 +225,157 @@ export default function Home() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+    }
+  }
+
+  function drawIdleWaveform() {
+    const canvas = waveformCanvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const preparedCanvas = prepareCanvas(canvas);
+
+    if (!preparedCanvas) {
+      return;
+    }
+
+    const { context, width, height } = preparedCanvas;
+
+    drawWaveformBackground(context, width, height);
+
+    context.lineWidth = Math.max(2, width * 0.003);
+    context.strokeStyle = "rgba(186, 238, 255, 0.5)";
+    context.beginPath();
+    context.moveTo(0, height / 2);
+    context.lineTo(width, height / 2);
+    context.stroke();
+  }
+
+  function drawWaveformFrame() {
+    const analyser = analyserRef.current;
+    const canvas = waveformCanvasRef.current;
+    const data = waveformDataRef.current;
+
+    if (!analyser || !canvas || !data) {
+      drawIdleWaveform();
+      return;
+    }
+
+    const preparedCanvas = prepareCanvas(canvas);
+
+    if (!preparedCanvas) {
+      return;
+    }
+
+    const { context, width, height } = preparedCanvas;
+
+    analyser.getByteTimeDomainData(data);
+    drawWaveformBackground(context, width, height);
+
+    let sum = 0;
+    let peak = 0;
+
+    context.beginPath();
+
+    for (let index = 0; index < data.length; index += 1) {
+      const normalized = (data[index] - 128) / 128;
+      const amplitude = Math.abs(normalized);
+      const x = (index / (data.length - 1)) * width;
+      const y = height / 2 + normalized * (height * 0.34);
+
+      sum += normalized * normalized;
+      peak = Math.max(peak, amplitude);
+
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    }
+
+    const rms = Math.sqrt(sum / data.length);
+    const averageLevel = Math.min(1, rms * 3.8);
+    const peakLevelValue = Math.min(1, peak * 1.75);
+    const now = performance.now();
+
+    context.lineWidth = Math.max(2, width * 0.0036);
+    context.strokeStyle = "rgba(140, 244, 214, 0.98)";
+    context.shadowBlur = 14;
+    context.shadowColor = "rgba(140, 244, 214, 0.42)";
+    context.stroke();
+    context.shadowBlur = 0;
+
+    if (now - meterUpdatedAtRef.current > 80) {
+      setInputLevel(Math.round(averageLevel * 100));
+      setPeakLevel(Math.round(peakLevelValue * 100));
+      meterUpdatedAtRef.current = now;
+    }
+
+    animationFrameRef.current = window.requestAnimationFrame(drawWaveformFrame);
+  }
+
+  function setupVisualizer(stream) {
+    teardownVisualizer(false);
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+      drawIdleWaveform();
+      return;
+    }
+
+    const context = new AudioContextClass();
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.84;
+
+    source.connect(analyser);
+
+    audioContextRef.current = context;
+    sourceNodeRef.current = source;
+    analyserRef.current = analyser;
+    waveformDataRef.current = new Uint8Array(analyser.fftSize);
+    meterUpdatedAtRef.current = 0;
+
+    setInputLevel(0);
+    setPeakLevel(0);
+
+    if (context.state === "suspended") {
+      void context.resume().catch(() => {});
+    }
+
+    drawWaveformFrame();
+  }
+
+  function teardownVisualizer(resetMeters = true) {
+    clearVisualizerFrame();
+
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      void audioContextRef.current.close().catch(() => {});
+    }
+
+    audioContextRef.current = null;
+    waveformDataRef.current = null;
+    meterUpdatedAtRef.current = 0;
+
+    if (resetMeters) {
+      setInputLevel(0);
+      setPeakLevel(0);
+      drawIdleWaveform();
     }
   }
 
@@ -228,6 +430,7 @@ export default function Home() {
         return;
       }
 
+      teardownVisualizer();
       stopStream();
       setIsRecording(false);
     }
@@ -239,6 +442,7 @@ export default function Home() {
     clearSegmentTick();
     segmentStartedAtRef.current = 0;
     recorderRef.current = null;
+    teardownVisualizer();
     stopStream();
     setIsRecording(false);
     setTimeUntilNextSaveMs(SEGMENT_DURATION_MS);
@@ -318,6 +522,13 @@ export default function Home() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
+      try {
+        setupVisualizer(stream);
+      } catch {
+        teardownVisualizer();
+      }
+
       shouldContinueRecordingRef.current = true;
       segmentNumberRef.current = 0;
       setSegmentsThisSession(0);
@@ -329,6 +540,7 @@ export default function Home() {
       clearSegmentStopTimeout();
       clearSegmentTick();
       segmentStartedAtRef.current = 0;
+      teardownVisualizer();
       stopStream();
       recorderRef.current = null;
       setIsRecording(false);
@@ -345,6 +557,7 @@ export default function Home() {
     if (!recorder) {
       clearSegmentTick();
       segmentStartedAtRef.current = 0;
+      teardownVisualizer();
       stopStream();
       setIsRecording(false);
       return;
@@ -353,6 +566,7 @@ export default function Home() {
     if (recorder.state === "inactive") {
       clearSegmentTick();
       segmentStartedAtRef.current = 0;
+      teardownVisualizer();
       stopStream();
       recorderRef.current = null;
       setIsRecording(false);
@@ -465,6 +679,61 @@ export default function Home() {
               </span>
             </div>
           </div>
+
+          <section className={styles.monitorPanel}>
+            <div className={styles.monitorHeader}>
+              <div>
+                <h2 className={styles.monitorTitle}>Audio Input Monitor</h2>
+                <p className={styles.monitorSubtitle}>
+                  Watch the live mic level and waveform while the recorder is
+                  capturing audio.
+                </p>
+              </div>
+              <span className={styles.monitorBadge}>
+                {isRecording ? "Live signal" : "Idle"}
+              </span>
+            </div>
+
+            <div className={styles.monitorGrid}>
+              <div className={styles.levelCard}>
+                <div className={styles.levelHeader}>
+                  <span className={styles.levelLabel}>Input level</span>
+                  <strong className={styles.levelValue}>{inputLevel}%</strong>
+                </div>
+
+                <div className={styles.levelTrack}>
+                  <div
+                    className={styles.levelFill}
+                    style={{ width: `${inputLevel}%` }}
+                  />
+                </div>
+
+                <div className={styles.levelMeta}>
+                  <span>Average {inputLevel}%</span>
+                  <span>Peak {peakLevel}%</span>
+                </div>
+              </div>
+
+              <div className={styles.waveformCard}>
+                <div className={styles.levelHeader}>
+                  <span className={styles.levelLabel}>Waveform</span>
+                  <strong className={styles.levelValue}>
+                    {isRecording ? "Listening" : "Standby"}
+                  </strong>
+                </div>
+
+                <canvas
+                  ref={waveformCanvasRef}
+                  className={styles.waveformCanvas}
+                />
+
+                <p className={styles.monitorHint}>
+                  The waveform and level meter become active as soon as microphone
+                  access is granted.
+                </p>
+              </div>
+            </div>
+          </section>
 
           {captureMimeType && !captureMimeType.includes("mp4") ? (
             <p className={styles.warning}>
@@ -760,4 +1029,51 @@ function getRecorderError(error) {
   }
 
   return error?.message || "The recorder could not be started.";
+}
+
+function prepareCanvas(canvas) {
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio));
+  const height = Math.max(1, Math.floor(canvas.clientHeight * devicePixelRatio));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  return { context, width, height };
+}
+
+function drawWaveformBackground(context, width, height) {
+  const backgroundGradient = context.createLinearGradient(0, 0, width, height);
+  backgroundGradient.addColorStop(0, "rgba(8, 18, 30, 0.98)");
+  backgroundGradient.addColorStop(1, "rgba(13, 39, 56, 0.92)");
+
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = backgroundGradient;
+  context.fillRect(0, 0, width, height);
+
+  context.strokeStyle = "rgba(255, 255, 255, 0.08)";
+  context.lineWidth = 1;
+
+  for (let line = 1; line <= 3; line += 1) {
+    const y = (height / 4) * line;
+
+    context.beginPath();
+    context.moveTo(0, y);
+    context.lineTo(width, y);
+    context.stroke();
+  }
+
+  context.strokeStyle = "rgba(180, 227, 245, 0.16)";
+  context.beginPath();
+  context.moveTo(0, height / 2);
+  context.lineTo(width, height / 2);
+  context.stroke();
 }

@@ -254,6 +254,123 @@
   color: #ffe6e6;
 }
 
+.monitorPanel {
+  position: relative;
+  z-index: 1;
+  margin-top: 24px;
+  padding: 24px;
+  border-radius: 26px;
+  background: rgba(6, 16, 30, 0.32);
+  border: 1px solid rgba(202, 245, 255, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.monitorHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.monitorTitle {
+  font-size: 1.24rem;
+  letter-spacing: -0.03em;
+}
+
+.monitorSubtitle {
+  margin-top: 6px;
+  color: rgba(234, 244, 248, 0.68);
+  line-height: 1.6;
+}
+
+.monitorBadge {
+  padding: 9px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ebf7fb;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.84rem;
+}
+
+.monitorGrid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.38fr) minmax(0, 0.62fr);
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.levelCard,
+.waveformCard {
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.levelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.levelLabel {
+  color: rgba(220, 236, 243, 0.72);
+  font-size: 0.84rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.levelValue {
+  font-size: 1.08rem;
+  line-height: 1.2;
+}
+
+.levelTrack {
+  margin-top: 22px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.levelFill {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, rgba(140, 244, 214, 0.94), rgba(255, 210, 129, 0.96));
+  box-shadow: 0 0 24px rgba(140, 244, 214, 0.24);
+  transition: width 80ms linear;
+}
+
+.levelMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  color: rgba(223, 236, 242, 0.7);
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.waveformCanvas {
+  display: block;
+  width: 100%;
+  height: 170px;
+  margin-top: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.monitorHint {
+  margin-top: 12px;
+  color: rgba(221, 235, 242, 0.7);
+  line-height: 1.65;
+}
+
 .dashboard {
   display: grid;
   grid-template-columns: minmax(320px, 0.95fr) minmax(320px, 1.05fr);
@@ -443,6 +560,7 @@
 
 @media (max-width: 1080px) {
   .metaGrid,
+  .monitorGrid,
   .dashboard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -464,6 +582,7 @@
   }
 
   .metaGrid,
+  .monitorGrid,
   .dashboard,
   .previewInfoGrid {
     grid-template-columns: minmax(0, 1fr);
